@@ -1,0 +1,4 @@
+target/
+*.o
+__pycache__/
+!construction/objets-ibmi/*.o

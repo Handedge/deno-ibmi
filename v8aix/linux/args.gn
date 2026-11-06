@@ -1,0 +1,20 @@
+# deno-ibmi: V8 15.0 (rusty_v8 v150.4.0) for IBM i PASE, cross-compilation
+target_os = "aix"
+target_cpu = "ppc64"
+v8_target_cpu = "ppc64"
+custom_toolchain = "//build/toolchain/aix:clang_ppc64"
+v8_snapshot_toolchain = "//build/toolchain/aix:clang_ppc64"
+clang_base_path = "/home/build/v8aix/clang"
+is_debug = false
+symbol_level = 0
+treat_warnings_as_errors = false
+use_custom_libcxx = true
+v8_enable_pointer_compression = false
+v8_enable_sandbox = false
+v8_enable_v8_checks = false
+rusty_v8_enable_simdutf = true
+enable_rust = false
+enable_rust_cxx = false
+v8_enable_temporal_support = false
+icu_use_data_file = true
+use_glib = false

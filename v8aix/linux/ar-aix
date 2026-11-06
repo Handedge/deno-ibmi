@@ -1,0 +1,6 @@
+#!/bin/sh
+# llvm-ar producing AIX archives (big archive format); drops -X64 (rejected outside AIX)
+# and -T (which would mean "thin archive" to llvm-ar)
+args=""
+for a in "$@"; do case "$a" in -X64|-X32_64|-T) ;; *) args="$args \"$a\"";; esac; done
+eval exec /home/build/v8aix/clang/bin/llvm-ar --format=bigarchive $args

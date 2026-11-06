@@ -1,0 +1,11 @@
+[package]
+name = "rust-db2"
+version = "0.1.0"
+edition = "2021"
+description = "Exemple : Rust sur IBM i (PASE) qui lit Db2 for i par la CLI SQL et remplit QTEMP pour un CL"
+
+# No dependencies: the PASE SQL CLI (libdb400.a) is called directly.
+[dependencies]
+
+[profile.release]
+opt-level = 2

@@ -1,0 +1,3 @@
+# Scripts are deployed to IBM i (PASE): LF line endings are mandatory
+* text=auto eol=lf
+*.rs text eol=lf

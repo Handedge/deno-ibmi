@@ -1,0 +1,68 @@
+@use '@carbon/react';
+
+body {
+  margin: 0;
+}
+
+.page {
+  padding-top: 4rem; // sous l'en-tête Carbon
+  padding-bottom: 2rem;
+}
+
+.connexion {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--cds-background);
+
+  .cds--tile {
+    width: 100%;
+    max-width: 26rem;
+    padding: 2rem;
+  }
+
+  h1 {
+    margin-bottom: 0.25rem;
+  }
+
+  .sous-titre {
+    color: var(--cds-text-secondary);
+    margin-bottom: 2rem;
+  }
+}
+
+.indicateurs {
+  margin-bottom: 2rem;
+
+  .cds--tile {
+    height: 100%;
+  }
+
+  .libelle {
+    color: var(--cds-text-secondary);
+    font-size: 0.875rem;
+  }
+
+  .valeur {
+    font-size: 1.75rem;
+    margin-top: 0.5rem;
+  }
+}
+
+// la règle de couleur des cellules Carbon (.cds--data-table td) l'emportait : sélecteur renforcé
+.cds--data-table td.negatif {
+  color: var(--cds-support-error);
+  font-weight: 600;
+}
+
+.notifications {
+  position: fixed;
+  top: 3.5rem;
+  right: 1rem;
+  z-index: 9000;
+}
+
+.titre-page {
+  margin: 1.5rem 0 1rem;
+}
