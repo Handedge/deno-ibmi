@@ -18,6 +18,13 @@ thanks to the work IBM has done for Node.js on AIX and IBM i; this project build
 
 Author: **Sylvain AKTEPE**. This is a personal, unofficial project; see the [Disclaimer](#disclaimer).
 
+> ⚠️ **A fun project, first and foremost.** This is an experiment done for the pleasure of seeing it work,
+> not a product. It comes **with no warranty, no support and no liability of any kind**: you use it
+> entirely at your own risk, and the author accepts no responsibility for any damage, data loss,
+> outage or other consequence. Do not run it on a production system without reviewing and testing it
+> yourself. Third-party rights (trademarks, licenses, IBM software) are listed in the
+> [Disclaimer](#disclaimer) and in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 > **Rebuilding Deno for IBM i: [`construction/README.md`](construction/README.md)** (one command on
 > LINUXBUILD, tests and delivery package included; deployment with `ibmi/livrer.sh`).
 
@@ -163,9 +170,32 @@ Verified working on the V8 build (2026-11-06): `WebAssembly`, `Deno.Command`, `n
 
 ## Disclaimer
 
-This is a personal, unofficial project, provided as is, without any warranty or support. It is not
-affiliated with, endorsed by or supported by Deno Land Inc. or IBM. "Deno" is a trademark of
-Deno Land Inc.; IBM i, AIX and Power are trademarks of IBM.
+**No liability.** This is a personal, unofficial hobby project, provided "as is", without warranty of
+any kind, express or implied, and without support. The author accepts **no responsibility** for any
+use of this code or of the binaries built with it, nor for any direct or indirect damage (data loss,
+system outage, security incident, ASP full, etc.). You are solely responsible for what you run on your
+machines. See also the [LICENSE](LICENSE) (MIT), whose warranty and liability disclaimer applies in full.
+
+**Not affiliated.** This project is not affiliated with, sponsored, endorsed or supported by
+Deno Land Inc., IBM or any other company.
+
+**What is subject to third-party rights:**
+
+- **Trademarks**: "Deno" and the Deno logo are trademarks of Deno Land Inc. IBM, IBM i, AIX, Power,
+  Db2 and PASE are trademarks of International Business Machines Corporation. Other names may be
+  trademarks of their respective owners. They are used here only to describe what the project works
+  with.
+- **Patched open-source code**: the patches modify Deno (MIT), rusty_v8 (MIT), V8 (BSD-3-Clause) and
+  many Rust crates (mostly MIT and/or Apache-2.0). The patched code remains under its original
+  license and copyright.
+- **Files built from third-party sources** (libffi, zlib-ng, psm objects, bindgen bindings of SQLite,
+  AWS-LC, nghttp2, libuv and V8 headers): each one stays under its own license, listed in
+  [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+- **IBM software is not distributed here**: the IBM Open SDK for Rust on AIX, the IBM Open XL C/C++
+  runtime, the PASE SQL CLI (`libdb400`) and IBM i itself must be obtained from IBM and used under
+  IBM's license terms.
+- **No Deno or V8 binary is distributed** in this repository, only the means to build one; a binary
+  you build includes third-party code under the licenses above.
 
 ## License
 

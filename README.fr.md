@@ -4,7 +4,14 @@ Faire tourner **Deno** (runtime JavaScript/TypeScript écrit en Rust) sur **IBM 
 
 Projet personnel et non officiel de Sylvain AKTEPE : ni Deno Land Inc. ni IBM ne sont associés à ce dépôt.
 
-> **Reconstruire Deno pour IBM i : [`construction/README.md`](construction/README.md)** (une commande sur
+> ⚠️ **Avant tout un projet ludique.** C'est une expérience menée pour le plaisir de la voir marcher, pas
+> un produit. Elle est fournie **sans garantie, sans support et sans aucune responsabilité** : vous
+> l'utilisez entièrement à vos risques, et l'auteur décline toute responsabilité pour tout dommage,
+> perte de données, arrêt ou autre conséquence. Ne la faites pas tourner sur un système de production
+> sans l'avoir relue et testée vous-même. Les droits des tiers (marques, licences, logiciels IBM) sont
+> listés dans l'[Avertissement](#avertissement) et dans [THIRD_PARTY_NOTICES.fr.md](THIRD_PARTY_NOTICES.fr.md).
+
+> **Reconstruire Deno pour IBM i : [`construction/README.md`](construction/README.fr.md)** (une commande sur
 > LINUXBUILD, tests et paquet de livraison compris ; mise en service par `ibmi/livrer.sh`).
 
 ## État (06/11/2026)
@@ -138,3 +145,25 @@ Vérifiées sur la version V8 le 06/11/2026 :
 - WAMR remplacé par une bibliothèque factice ; l'API `WebAssembly` standard, fournie par V8, fonctionne.
 
 Fonctionnent (vérifié) : `WebAssembly`, `Deno.Command`, `node:crypto`, `Deno.osUptime()`, `Deno.systemMemoryInfo()`, sortie naturelle du processus après des appels Db2 asynchrones.
+
+## Avertissement
+
+**Aucune responsabilité.** Projet personnel, non officiel et ludique, fourni « tel quel », sans garantie d'aucune sorte, expresse ou implicite, et sans support. L'auteur **décline toute responsabilité** quant à l'utilisation de ce code ou des binaires construits avec, et quant à tout dommage direct ou indirect (perte de données, arrêt d'un système, incident de sécurité, ASP plein, etc.). Vous êtes seul responsable de ce que vous exécutez sur vos machines. Voir aussi la [LICENSE](LICENSE) (MIT), dont l'exclusion de garantie et de responsabilité s'applique pleinement.
+
+**Non affilié.** Ce projet n'est ni affilié, ni parrainé, ni approuvé, ni soutenu par Deno Land Inc., IBM ou toute autre société.
+
+**Ce qui est soumis aux droits de tiers :**
+
+- **Marques** : « Deno » et le logo Deno sont des marques de Deno Land Inc. IBM, IBM i, AIX, Power, Db2 et PASE sont des marques d'International Business Machines Corporation. Les autres noms peuvent être des marques de leurs propriétaires respectifs. Ils ne sont cités que pour décrire ce avec quoi le projet fonctionne.
+- **Code open source modifié** : les correctifs modifient Deno (MIT), rusty_v8 (MIT), V8 (BSD-3-Clause) et de nombreuses crates Rust (surtout MIT et/ou Apache-2.0). Le code modifié reste sous sa licence et son copyright d'origine.
+- **Fichiers construits à partir de sources tierces** (objets de libffi, zlib-ng et psm ; liaisons bindgen des en-têtes de SQLite, AWS-LC, nghttp2, libuv et V8) : chacun reste sous sa propre licence, listée dans [THIRD_PARTY_NOTICES.fr.md](THIRD_PARTY_NOTICES.fr.md).
+- **Aucun logiciel IBM n'est distribué ici** : l'IBM Open SDK for Rust on AIX, le runtime IBM Open XL C/C++, la CLI SQL de PASE (`libdb400`) et IBM i lui-même s'obtiennent auprès d'IBM et s'utilisent selon les conditions de licence d'IBM.
+- **Aucun binaire de Deno ni de V8 n'est distribué** dans ce dépôt, seulement de quoi en construire un ; un binaire que vous construisez contient du code tiers soumis aux licences ci-dessus.
+
+## Licence
+
+MIT (voir [LICENSE](LICENSE)). Composants tiers : [THIRD_PARTY_NOTICES.fr.md](THIRD_PARTY_NOTICES.fr.md).
+
+## Auteur
+
+Sylvain AKTEPE.
