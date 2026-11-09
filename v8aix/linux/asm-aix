@@ -15,10 +15,10 @@ case "$src" in
     if [ -f "$obj" ]; then
       cp "$obj" "$out"
       [ -n "$out" ] && : > "$out.d" 2>/dev/null
-      echo "asm-aix : $src -> objet assemblé sur IBM i ($obj)"
+      echo "asm-aix: $src -> object assembled on IBM i ($obj)"
       exit 0
     fi
-    echo "asm-aix : $obj absent (assembler embedded.S sur IBM i)" >&2
+    echo "asm-aix: $obj missing (assemble embedded.S on IBM i)" >&2
     exit 1;;
 esac
 exec "$HOME/v8aix/clang/bin/clang" --target=powerpc64-ibm-aix7.2 -fintegrated-as "$@"

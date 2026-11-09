@@ -30,30 +30,30 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#define NB_CACHE 4096
+#define CACHE_SIZE 4096
 
-struct entree { dev_t dev; ino_t ino; char *chemin; };
-static struct entree cache[NB_CACHE];
-static pthread_mutex_t verrou = PTHREAD_MUTEX_INITIALIZER;
+struct cache_entry { dev_t dev; ino_t ino; char *path; };
+static struct cache_entry cache[CACHE_SIZE];
+static pthread_mutex_t cache_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static void memoriser(int fd, const char *chemin)
+static void remember(int fd, const char *path)
 {
     struct stat st;
-    if (fd < 0 || fd >= NB_CACHE || fstat(fd, &st) != 0 || !S_ISDIR(st.st_mode))
+    if (fd < 0 || fd >= CACHE_SIZE || fstat(fd, &st) != 0 || !S_ISDIR(st.st_mode))
         return;
-    char *copie = strdup(chemin);
-    if (!copie)
+    char *copy = strdup(path);
+    if (!copy)
         return;
-    pthread_mutex_lock(&verrou);
-    free(cache[fd].chemin);
+    pthread_mutex_lock(&cache_lock);
+    free(cache[fd].path);
     cache[fd].dev = st.st_dev;
     cache[fd].ino = st.st_ino;
-    cache[fd].chemin = copie;
-    pthread_mutex_unlock(&verrou);
+    cache[fd].path = copy;
+    pthread_mutex_unlock(&cache_lock);
 }
 
 /* Absolute path of the directory open on fd (or of the current directory). */
-static int chemin_de(int fd, char *buf, size_t n)
+static int path_of(int fd, char *buf, size_t n)
 {
     if (fd == AT_FDCWD)
         return getcwd(buf, n) ? 0 : -1;
@@ -65,74 +65,74 @@ static int chemin_de(int fd, char *buf, size_t n)
         return -1;
     }
     int ok = -1;
-    pthread_mutex_lock(&verrou);
-    if (fd < NB_CACHE && cache[fd].chemin && cache[fd].dev == st.st_dev && cache[fd].ino == st.st_ino) {
-        if (strlen(cache[fd].chemin) < n) {
-            strcpy(buf, cache[fd].chemin);
+    pthread_mutex_lock(&cache_lock);
+    if (fd < CACHE_SIZE && cache[fd].path && cache[fd].dev == st.st_dev && cache[fd].ino == st.st_ino) {
+        if (strlen(cache[fd].path) < n) {
+            strcpy(buf, cache[fd].path);
             ok = 0;
         } else {
             errno = ENAMETOOLONG;
         }
-        pthread_mutex_unlock(&verrou);
+        pthread_mutex_unlock(&cache_lock);
         return ok;
     }
     /* fallback: fchdir + getcwd, then back to the original current directory */
-    int ici = open(".", O_RDONLY);
-    if (ici >= 0) {
+    int here = open(".", O_RDONLY);
+    if (here >= 0) {
         if (fchdir(fd) == 0) {
             if (getcwd(buf, n))
                 ok = 0;
             int e = errno;
-            fchdir(ici);
+            fchdir(here);
             errno = e;
         }
-        close(ici);
+        close(here);
     }
-    pthread_mutex_unlock(&verrou);
+    pthread_mutex_unlock(&cache_lock);
     if (ok == 0)
-        memoriser(fd, buf);
+        remember(fd, buf);
     return ok;
 }
 
 /* Builds the full path; returns the name unchanged if it is absolute. */
-static const char *complet(int dirfd, const char *nom, char *buf)
+static const char *full_path(int dirfd, const char *name, char *buf)
 {
-    if (nom == NULL) {
+    if (name == NULL) {
         errno = EFAULT;
         return NULL;
     }
     static int trace = -1;
     if (trace < 0)
         trace = getenv("PASEAT_TRACE") != NULL;
-    if (nom[0] == '/' || dirfd == AT_FDCWD) {
+    if (name[0] == '/' || dirfd == AT_FDCWD) {
         if (trace)
-            fprintf(stderr, "paseat: fd=%d nom=%s (direct)\n", dirfd, nom);
-        return nom;
+            fprintf(stderr, "paseat: fd=%d name=%s (direct)\n", dirfd, name);
+        return name;
     }
-    char rep[PATH_MAX];
-    if (chemin_de(dirfd, rep, sizeof rep) != 0) {
+    char dir[PATH_MAX];
+    if (path_of(dirfd, dir, sizeof dir) != 0) {
         if (trace)
-            fprintf(stderr, "paseat: fd=%d nom=%s -> echec chemin errno=%d\n", dirfd, nom, errno);
+            fprintf(stderr, "paseat: fd=%d name=%s -> path lookup failed errno=%d\n", dirfd, name, errno);
         return NULL;
     }
     if (trace)
-        fprintf(stderr, "paseat: fd=%d nom=%s -> %s/%s\n", dirfd, nom, rep, nom);
-    size_t lr = strlen(rep), ln = strlen(nom);
-    if (lr + 1 + ln + 1 > PATH_MAX) {
+        fprintf(stderr, "paseat: fd=%d name=%s -> %s/%s\n", dirfd, name, dir, name);
+    size_t dir_len = strlen(dir), name_len = strlen(name);
+    if (dir_len + 1 + name_len + 1 > PATH_MAX) {
         errno = ENAMETOOLONG;
         return NULL;
     }
-    memcpy(buf, rep, lr);
-    if (lr == 0 || rep[lr - 1] != '/')
-        buf[lr++] = '/';
-    memcpy(buf + lr, nom, ln + 1);
+    memcpy(buf, dir, dir_len);
+    if (dir_len == 0 || dir[dir_len - 1] != '/')
+        buf[dir_len++] = '/';
+    memcpy(buf + dir_len, name, name_len + 1);
     return buf;
 }
 
-static int ouvrir(int dirfd, const char *nom, int flags, mode_t mode, int en64)
+static int open_at(int dirfd, const char *name, int flags, mode_t mode, int is64)
 {
     char buf[PATH_MAX];
-    const char *p = complet(dirfd, nom, buf);
+    const char *p = full_path(dirfd, name, buf);
     if (!p)
         return -1;
     struct stat st;
@@ -145,7 +145,7 @@ static int ouvrir(int dirfd, const char *nom, int flags, mode_t mode, int en64)
         errno = ENOTDIR;
         return -1;
     }
-    int fd = en64 ? open64(p, flags, mode) : open(p, flags, mode);
+    int fd = is64 ? open64(p, flags, mode) : open(p, flags, mode);
     /* PASE ignores O_DIRECTORY on a regular file: enforce the standard behavior
        (check kept after opening, in case the file changed in the meantime) */
     if (fd >= 0 && (flags & O_DIRECTORY) && fstat(fd, &st) == 0 && !S_ISDIR(st.st_mode)) {
@@ -157,17 +157,17 @@ static int ouvrir(int dirfd, const char *nom, int flags, mode_t mode, int en64)
         /* absolute path cached (directories only) for subsequent *at() calls */
         char abs[PATH_MAX];
         if (p[0] == '/')
-            memoriser(fd, p);
+            remember(fd, p);
         else if (getcwd(abs, sizeof abs) && strlen(abs) + strlen(p) + 2 < PATH_MAX) {
             strcat(abs, "/");
             strcat(abs, p);
-            memoriser(fd, abs);
+            remember(fd, abs);
         }
     }
     return fd;
 }
 
-int openat(int dirfd, const char *nom, int flags, ...)
+int openat(int dirfd, const char *name, int flags, ...)
 {
     mode_t mode = 0;
     if (flags & O_CREAT) {
@@ -176,10 +176,10 @@ int openat(int dirfd, const char *nom, int flags, ...)
         mode = (mode_t)va_arg(ap, int);
         va_end(ap);
     }
-    return ouvrir(dirfd, nom, flags, mode, 0);
+    return open_at(dirfd, name, flags, mode, 0);
 }
 
-int openat64(int dirfd, const char *nom, int flags, ...)
+int openat64(int dirfd, const char *name, int flags, ...)
 {
     mode_t mode = 0;
     if (flags & O_CREAT) {
@@ -188,47 +188,47 @@ int openat64(int dirfd, const char *nom, int flags, ...)
         mode = (mode_t)va_arg(ap, int);
         va_end(ap);
     }
-    return ouvrir(dirfd, nom, flags, mode, 1);
+    return open_at(dirfd, name, flags, mode, 1);
 }
 
-int fstatat(int dirfd, const char *nom, struct stat *st, int flags)
+int fstatat(int dirfd, const char *name, struct stat *st, int flags)
 {
     char buf[PATH_MAX];
-    const char *p = complet(dirfd, nom, buf);
+    const char *p = full_path(dirfd, name, buf);
     if (!p)
         return -1;
     return (flags & AT_SYMLINK_NOFOLLOW) ? lstat(p, st) : stat(p, st);
 }
 
-int fstatat64(int dirfd, const char *nom, struct stat64 *st, int flags)
+int fstatat64(int dirfd, const char *name, struct stat64 *st, int flags)
 {
     char buf[PATH_MAX];
-    const char *p = complet(dirfd, nom, buf);
+    const char *p = full_path(dirfd, name, buf);
     if (!p)
         return -1;
     return (flags & AT_SYMLINK_NOFOLLOW) ? lstat64(p, st) : stat64(p, st);
 }
 
-int unlinkat(int dirfd, const char *nom, int flags)
+int unlinkat(int dirfd, const char *name, int flags)
 {
     char buf[PATH_MAX];
-    const char *p = complet(dirfd, nom, buf);
+    const char *p = full_path(dirfd, name, buf);
     if (!p)
         return -1;
     return (flags & AT_REMOVEDIR) ? rmdir(p) : unlink(p);
 }
 
-int mkdirat(int dirfd, const char *nom, mode_t mode)
+int mkdirat(int dirfd, const char *name, mode_t mode)
 {
     char buf[PATH_MAX];
-    const char *p = complet(dirfd, nom, buf);
+    const char *p = full_path(dirfd, name, buf);
     return p ? mkdir(p, mode) : -1;
 }
 
 int renameat(int d1, const char *n1, int d2, const char *n2)
 {
     char b1[PATH_MAX], b2[PATH_MAX];
-    const char *p1 = complet(d1, n1, b1), *p2 = p1 ? complet(d2, n2, b2) : NULL;
+    const char *p1 = full_path(d1, n1, b1), *p2 = p1 ? full_path(d2, n2, b2) : NULL;
     return (p1 && p2) ? rename(p1, p2) : -1;
 }
 
@@ -236,46 +236,46 @@ int linkat(int d1, const char *n1, int d2, const char *n2, int flags)
 {
     (void)flags;
     char b1[PATH_MAX], b2[PATH_MAX];
-    const char *p1 = complet(d1, n1, b1), *p2 = p1 ? complet(d2, n2, b2) : NULL;
+    const char *p1 = full_path(d1, n1, b1), *p2 = p1 ? full_path(d2, n2, b2) : NULL;
     return (p1 && p2) ? link(p1, p2) : -1;
 }
 
-int symlinkat(const char *cible, int dirfd, const char *nom)
+int symlinkat(const char *target, int dirfd, const char *name)
 {
     char buf[PATH_MAX];
-    const char *p = complet(dirfd, nom, buf);
-    return p ? symlink(cible, p) : -1;
+    const char *p = full_path(dirfd, name, buf);
+    return p ? symlink(target, p) : -1;
 }
 
-int readlinkat(int dirfd, const char *nom, char *dst, size_t n)
+int readlinkat(int dirfd, const char *name, char *dst, size_t n)
 {
     char buf[PATH_MAX];
-    const char *p = complet(dirfd, nom, buf);
+    const char *p = full_path(dirfd, name, buf);
     return p ? (int)readlink(p, dst, n) : -1;
 }
 
-int fchmodat(int dirfd, const char *nom, mode_t mode, int flags)
+int fchmodat(int dirfd, const char *name, mode_t mode, int flags)
 {
     (void)flags;
     char buf[PATH_MAX];
-    const char *p = complet(dirfd, nom, buf);
+    const char *p = full_path(dirfd, name, buf);
     return p ? chmod(p, mode) : -1;
 }
 
-int fchownat(int dirfd, const char *nom, uid_t u, gid_t g, int flags)
+int fchownat(int dirfd, const char *name, uid_t u, gid_t g, int flags)
 {
     char buf[PATH_MAX];
-    const char *p = complet(dirfd, nom, buf);
+    const char *p = full_path(dirfd, name, buf);
     if (!p)
         return -1;
     return (flags & AT_SYMLINK_NOFOLLOW) ? lchown(p, u, g) : chown(p, u, g);
 }
 
-int faccessat(int dirfd, const char *nom, int mode, int flags)
+int faccessat(int dirfd, const char *name, int mode, int flags)
 {
     (void)flags;
     char buf[PATH_MAX];
-    const char *p = complet(dirfd, nom, buf);
+    const char *p = full_path(dirfd, name, buf);
     return p ? access(p, mode) : -1;
 }
 
@@ -284,14 +284,14 @@ int faccessat(int dirfd, const char *nom, int mode, int flags)
  * fcntl is looked up in libc with dlsym: a direct call to "fcntl" from this
  * module would resolve to this very function. */
 #include <dlfcn.h>
-static int (*vrai_fcntl)(int, int, ...);
-static pthread_once_t fcntl_une_fois = PTHREAD_ONCE_INIT;
+static int (*real_fcntl)(int, int, ...);
+static pthread_once_t fcntl_once = PTHREAD_ONCE_INIT;
 
-static void charger_fcntl(void)
+static void load_fcntl(void)
 {
     void *h = dlopen("libc.a(shr_64.o)", RTLD_NOW | RTLD_MEMBER);
     if (h)
-        vrai_fcntl = (int (*)(int, int, ...))dlsym(h, "fcntl");
+        real_fcntl = (int (*)(int, int, ...))dlsym(h, "fcntl");
 }
 
 int fcntl(int fd, int cmd, ...)
@@ -300,18 +300,18 @@ int fcntl(int fd, int cmd, ...)
     va_start(ap, cmd);
     long arg = va_arg(ap, long);
     va_end(ap);
-    pthread_once(&fcntl_une_fois, charger_fcntl);
-    if (!vrai_fcntl) {
+    pthread_once(&fcntl_once, load_fcntl);
+    if (!real_fcntl) {
         errno = ENOSYS;
         return -1;
     }
     if (cmd == F_DUPFD_CLOEXEC) {
-        int r = vrai_fcntl(fd, F_DUPFD, arg);
+        int r = real_fcntl(fd, F_DUPFD, arg);
         if (r >= 0)
-            vrai_fcntl(r, F_SETFD, FD_CLOEXEC);
+            real_fcntl(r, F_SETFD, FD_CLOEXEC);
         return r;
     }
-    return vrai_fcntl(fd, cmd, arg);
+    return real_fcntl(fd, cmd, arg);
 }
 
 /* read: reading a directory fails under PASE with EOPNOTSUPP (64, "Operation not

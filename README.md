@@ -25,8 +25,8 @@ Author: **Sylvain AKTEPE**. This is a personal, unofficial project; see the [Dis
 > yourself. Third-party rights (trademarks, licenses, IBM software) are listed in the
 > [Disclaimer](#disclaimer) and in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-> **Rebuilding Deno for IBM i: [`construction/README.md`](construction/README.md)** (one command on
-> LINUXBUILD, tests and delivery package included; deployment with `ibmi/livrer.sh`).
+> **Rebuilding Deno for IBM i: [`build/README.md`](build/README.md)** (one command on
+> LINUXBUILD, tests and delivery package included; deployment with `ibmi/deploy.sh`).
 
 ## Status (2026-11-06)
 
@@ -43,29 +43,29 @@ Working machine: IBMI (Power S922, IBM i 7.5, 2 cores, 64 GB).
 
 | Directory | Contents |
 |---|---|
-| `construction/` | one-command build, prerequisite check, delivery ([guide](construction/README.md)) |
+| `build/` | one-command build, prerequisite check, delivery ([guide](build/README.md)) |
 | `ibmi/rustenv.sh` | Rust environment under PASE (to be sourced) |
 | `ibmi/paseat/` | **libpaseat**: PASE compatibility layer (see below) |
-| `ibmi/correctifs.py` | replays all patches (crates and Deno sources) |
+| `ibmi/patches.py` | replays all patches (crates and Deno sources) |
 | `ibmi/build-deno.sh` | Deno build (submitted as a batch job) |
-| `ibmi/livrer.sh` | installs a delivery package on IBM i (administrator) |
-| `liaisons/` | pre-generated bindgen bindings for `powerpc64-ibm-aix` |
-| `linux/generer_liaisons.sh` | generation of these bindings on Linux |
-| `linux/croise/` | cross-compilation tools ([notes](linux/croise/README.md)) |
+| `ibmi/deploy.sh` | installs a delivery package on IBM i (administrator) |
+| `bindings/` | pre-generated bindgen bindings for `powerpc64-ibm-aix` |
+| `linux/generate_bindings.sh` | generation of these bindings on Linux |
+| `linux/cross/` | cross-compilation tools ([notes](linux/cross/README.md)) |
 | `v8aix/` | V8 for IBM i, cross-compiled ([notes](v8aix/README.md)) |
-| `tests-deno/` | Deno's official unit tests on IBM i vs. x64 reference ([notes](tests-deno/README.md)) |
-| `outils/` | installp image (BFF) extractor, XCOFF import rewriting, WAMR stub |
-| `poste/` | Windows workstation helpers (sending and fetching files via Mapepire) |
-| `essais/` | Rust web service, Deno web service (`essais/deno-ws`), PASE diagnostics |
+| `deno-tests/` | Deno's official unit tests on IBM i vs. x64 reference ([notes](deno-tests/README.md)) |
+| `tools/` | installp image (BFF) extractor, XCOFF import rewriting, WAMR stub |
+| `workstation/` | Windows workstation helpers (sending and fetching files via Mapepire) |
+| `examples/` | Rust web service, Deno web service (`examples/deno-ws`), PASE diagnostics |
 
 ## Installing Rust under PASE (summary)
 
 1. AIX 7.2 RPMs of the **IBM Open SDK for Rust on AIX** (AIX Toolbox, `RPMS/ppc-7.2/rust/`, free Community Edition) extracted into `/QOpenSys/opt/rust/1.96`, without going through the IBM i rpm database.
-2. **IBM Open XL C/C++ 17.1.4.2 runtime** (Fix Central): `libc++`, `libc++abi`, `libunwind`, `libcompiler_rt` extracted from the installp images by `outils/bff_extract.py`, copied into `/QOpenSys/opt/rust/runtime` (never into `/QOpenSys/usr/lib`).
+2. **IBM Open XL C/C++ 17.1.4.2 runtime** (Fix Central): `libc++`, `libc++abi`, `libunwind`, `libcompiler_rt` extracted from the installp images by `tools/bff_extract.py`, copied into `/QOpenSys/opt/rust/runtime` (never into `/QOpenSys/usr/lib`).
 3. `libz` and `libatomic` from yum repackaged in the expected format (`archive.a(lib.so.N)`).
-4. `.cargo.orig`: import table rewritten (`outils/xcoff_imports.py`) to use the OpenSSL from yum (avoids two instances of libcrypto).
+4. `.cargo.orig`: import table rewritten (`tools/xcoff_imports.py`) to use the OpenSSL from yum (avoids two instances of libcrypto).
 5. Certificates: bundle built from `/QOpenSys/var/lib/ca-certificates/openssl` (the `cert.pem` on IBMI was empty).
-6. `libpaseat`: `ibmi/paseat/construire.sh`.
+6. `libpaseat`: `ibmi/paseat/build.sh`.
 
 Always start jobs with `SBMJOB CMD(CALL PGM(QP2SHELL) ...) ALWMLTTHD(*YES)`: under QSH, DNS resolution fails (`getaddrinfo() thread failed to start`).
 
@@ -93,35 +93,35 @@ libpaseat is linked before libc (`RUSTFLAGS -l paseat`): the AIX linker then bin
 
 Two options, as with Node.js:
 
-- **Native**: `Deno.serve({ port: 3444, cert, key })` (rustls, TLS 1.3, `TLS_AES_256_GCM_SHA384`, TLS 1.1 refused). Certificate created by `essais/deno-ws/apache/creer-certificat.sh` in `/QOpenSys/opt/denoibmi/tls`: local authority "deno-ibmi CA locale" (10 years) and certificate `CN=ibmi` with SAN `ibmi`, `localhost`, `192.0.2.82`, `127.0.0.1` (2 years). Key readable by `DENOAPP` only. On the client side, trust `ca.crt` (Windows curl: `--ssl-no-revoke`, the private authority has no revocation list).
-- **Apache** (instance `DENOWS`, `essais/deno-ws/apache/httpd.conf`, same model as NODEWS): TLS on `*:3443` through the DCM application ID `QIBM_HTTP_SERVER_DENOWS`, forwarding to `127.0.0.1:3081`. `httpd.conf` must be tagged CCSID 1208 (`CHGATR ... ATR(*CCSID) VALUE(1208)`), otherwise Apache reads it as EBCDIC. The certificate is assigned in DCM (no scriptable way); without a certificate, the instance's jobs abort (HTP8351): do not leave it started.
+- **Native**: `Deno.serve({ port: 3444, cert, key })` (rustls, TLS 1.3, `TLS_AES_256_GCM_SHA384`, TLS 1.1 refused). Certificate created by `examples/deno-ws/apache/create-certificate.sh` in `/QOpenSys/opt/denoibmi/tls`: local authority "deno-ibmi CA locale" (10 years) and certificate `CN=ibmi` with SAN `ibmi`, `localhost`, `192.0.2.82`, `127.0.0.1` (2 years). Key readable by `DENOAPP` only. On the client side, trust `ca.crt` (Windows curl: `--ssl-no-revoke`, the private authority has no revocation list).
+- **Apache** (instance `DENOWS`, `examples/deno-ws/apache/httpd.conf`, same model as NODEWS): TLS on `*:3443` through the DCM application ID `QIBM_HTTP_SERVER_DENOWS`, forwarding to `127.0.0.1:3081`. `httpd.conf` must be tagged CCSID 1208 (`CHGATR ... ATR(*CCSID) VALUE(1208)`), otherwise Apache reads it as EBCDIC. The certificate is assigned in DCM (no scriptable way); without a certificate, the instance's jobs abort (HTP8351): do not leave it started.
 
 ## Db2 for i from Deno
 
-`essais/deno-db2/db2.ts`: a TypeScript module with no native code, which calls the PASE SQL CLI (`libdb400.a(shr_64.o)`) through `Deno.dlopen`, as idb-connector, IBM's Node.js driver, does in C++ (CLI in UTF-8 through `SQLOverrideCCSID400(1208)`, server mode, columns read as characters then converted).
+`examples/deno-db2/db2.ts`: a TypeScript module with no native code, which calls the PASE SQL CLI (`libdb400.a(shr_64.o)`) through `Deno.dlopen`, as idb-connector, IBM's Node.js driver, does in C++ (CLI in UTF-8 through `SQLOverrideCCSID400(1208)`, server mode, columns read as characters then converted).
 
 ```ts
 import { Db2 } from "./db2.ts";
-const db = new Db2();                      // *LOCAL, profil du travail ; options : utilisateur, motDePasse, bibliotheque, nommageSysteme
-const lignes = db.query("SELECT * FROM QSYS2.SYSTABLES WHERE TABLE_SCHEMA = ?", ["QSYS2"]);
-db.execute("UPDATE ... WHERE ID = ?", [42]);   // { lignes, lignesTouchees }
+const db = new Db2();                      // *LOCAL, job profile; options: user, password, library, systemNaming
+const rows = db.query("SELECT * FROM QSYS2.SYSTABLES WHERE TABLE_SCHEMA = ?", ["QSYS2"]);
+db.execute("UPDATE ... WHERE ID = ?", [42]);   // { rows, rowsAffected }
 ```
 
-(`new Db2()` connects to `*LOCAL` with the job's profile; options: `utilisateur` (user), `motDePasse`
-(password), `bibliotheque` (library), `nommageSysteme` (system naming). `execute` returns
-`{ lignes, lignesTouchees }`: rows and affected row count.)
+(`new Db2()` connects to `*LOCAL` with the job's profile; options: `user`, `password`, `library`
+(default schema), `systemNaming` (*SYS naming), `database`, `autocommit`. `execute` returns
+`{ rows, rowsAffected }`: rows and affected row count.)
 
 Non-blocking version and connection pool (SQL execution runs in a Deno thread, the event loop keeps serving):
 
 ```ts
 import { Db2Pool } from "./db2.ts";
-const pool = new Db2Pool(4);               // 4 connexions, 4 travaux QSQSRVR
-const lignes = await pool.query("SELECT ... WHERE X = ?", [x]);
-await pool.avec(async (db) => { await db.executeAsync("UPDATE ..."); db.commit(); });  // transaction
+const pool = new Db2Pool(4);               // 4 connections, 4 QSQSRVR jobs
+const rows = await pool.query("SELECT ... WHERE X = ?", [x]);
+await pool.withConnection(async (db) => { await db.executeAsync("UPDATE ..."); db.commit(); });  // transaction
 ```
 
-(`new Db2Pool(4)` opens 4 connections, i.e. 4 QSQSRVR jobs; `pool.avec(...)` runs a transaction on one
-connection.)
+(`new Db2Pool(4)` opens 4 connections, i.e. 4 QSQSRVR jobs; `pool.withConnection(...)` runs a transaction on one
+connection; `pool.stats` gives `{ size, open, idle, waiting }`.)
 
 Measured on IBMI: 4 one-second queries (DLYJOB) in parallel in 1.04 s; 50 concurrent queries, all correct, in 29 ms.
 
@@ -129,7 +129,7 @@ Run with `--allow-ffi`. Types: integers, DOUBLE and DECIMAL up to 15 digits as n
 
 ## Running the Deno web service
 
-Under a dedicated profile with no special authorities (`DENOAPP`: `*USER`, `PASSWORD(*NONE)`, `LMTCPB(*YES)`). The binary, `serveur.ts`, `ws.sh` and `db2.ts` are `*PUBLIC *RX` (the service cannot modify its own code, checked by `essais/deno-ws/verifier-droits.sh`); only `ws/logs` and `ws/cache` belong to `DENOAPP`.
+Under a dedicated profile with no special authorities (`DENOAPP`: `*USER`, `PASSWORD(*NONE)`, `LMTCPB(*YES)`). The binary, `serveur.ts`, `ws.sh` and `db2.ts` are `*PUBLIC *RX` (the service cannot modify its own code, checked by `examples/deno-ws/check-authorities.sh`); only `ws/logs` and `ws/cache` belong to `DENOAPP`.
 
 ```
 SBMJOB CMD(CALL PGM(QP2SHELL) PARM('/QOpenSys/usr/bin/sh' '/QOpenSys/opt/denoibmi/ws/ws.sh'))
@@ -138,20 +138,20 @@ SBMJOB CMD(CALL PGM(QP2SHELL) PARM('/QOpenSys/usr/bin/sh' '/QOpenSys/opt/denoibm
 
 `INLLIBL(*JOBD)`: otherwise the submitter's library list is copied (CPF1266 if the profile is not authorized to it).
 
-`ws.sh` (in `essais/deno-ws`) sets `DENO_NO_UPDATE_CHECK=1`: without it, the update check of `deno run` (outgoing HTTPS fetch) makes the process abort.
+`ws.sh` (in `examples/deno-ws`) sets `DENO_NO_UPDATE_CHECK=1`: without it, the update check of `deno run` (outgoing HTTPS fetch) makes the process abort.
 
 In service, the web service runs in its own subsystem started at IPL: see
-[`essais/deno-ws/sous-systeme.md`](essais/deno-ws/sous-systeme.md).
+[`examples/deno-ws/subsystem.md`](examples/deno-ws/subsystem.md).
 
 ## Known limitations
 
 - **WAMR is not available**: WAMR (used by Deno for a few internal WebAssembly helpers) assumes a
-  little-endian machine and knows neither AIX nor PowerPC; it is replaced by a stub library (`outils/`).
+  little-endian machine and knows neither AIX nor PowerPC; it is replaced by a stub library (`tools/`).
   The standard `WebAssembly` API is provided by V8 and works (`WebAssembly.instantiate`, verified).
 - **`deno compile` is unusable**: XCOFF binaries have no embedded section for the payload.
 - **Tests excluded as not applicable on IBM i**: a small set of official unit tests is excluded from the
   "applicable" score, each with its documented reason in
-  [`tests-deno/comparer-unit.py`](tests-deno/comparer-unit.py): no GPU (WebGPU, canvas), no esbuild binary
+  [`deno-tests/compare-unit.py`](deno-tests/compare-unit.py): no GPU (WebGPU, canvas), no esbuild binary
   for AIX, IFS timestamps with one-second resolution, no `/dev/fd` in PASE, IBM i ephemeral port range,
   vsock (Linux only), AIX `flock` semantics (fcntl locks), etc. The remaining 3 gaps of the reference run
   are due to the test bench, not to Deno (PASE curl built without HTTP/2; a 4 GB ArrayBuffer under the
@@ -220,7 +220,7 @@ Milestones of the first port, on the QuickJS engine (2026-10-29), kept for the r
 | `Deno.serve()` on IBM i, called from a workstation | done (10/29, 6:23 pm: HTTP 200, ~40 ms, 200/200) |
 | Outgoing HTTPS `fetch()`, certificate verified | done (10/30) |
 | `Deno.serve()` with an asynchronous handler (timer, file, fetch) | done (10/30, mio patch) |
-| Db2 for i access (`essais/deno-db2/db2.ts`, FFI over the `libdb400` CLI) | done (10/30: 0.5 ms per prepared statement, UTF-8, LOB, SQLSTATE errors) |
+| Db2 for i access (`examples/deno-db2/db2.ts`, FFI over the `libdb400` CLI) | done (10/30: 0.5 ms per prepared statement, UTF-8, LOB, SQLSTATE errors) |
 | Deno web service reading Db2, called from a workstation | done (10/30, routes `/db2/*`) |
 | Native Deno HTTPS (rustls, TLS 1.3) on 3444 | done (10/30, local deno-ibmi authority) |
 | HTTPS through Apache (DENOWS instance, reverse proxy 3443) | configured; waiting for the certificate in DCM |

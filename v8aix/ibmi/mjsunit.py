@@ -14,79 +14,79 @@ import subprocess
 import sys
 import time
 
-RACINE = pathlib.Path(sys.argv[1])
+ROOT = pathlib.Path(sys.argv[1])
 D8 = sys.argv[2]
-SORTIE = pathlib.Path(sys.argv[3])
-PARALLELE = int(sys.argv[4]) if len(sys.argv) > 4 else 6
-FILTRE = sys.argv[5] if len(sys.argv) > 5 else ""
-DELAI = 120                      # s (run-tests: 60 in release, x4 for slow tests)
-SUITE = RACINE / "test/mjsunit"
+OUTPUT = pathlib.Path(sys.argv[3])
+PARALLELISM = int(sys.argv[4]) if len(sys.argv) > 4 else 6
+FILTER = sys.argv[5] if len(sys.argv) > 5 else ""
+TIMEOUT = 120                      # s (run-tests: 60 in release, x4 for slow tests)
+SUITE = ROOT / "test/mjsunit"
 
 FLAGS = re.compile(r"//\s+Flags:(.*)")
 FILES = re.compile(r"//\s+Files:(.*)")
 ENV = re.compile(r"//\s+Environment Variables:(.*)")
 NO_HARNESS = re.compile(r"^// NO HARNESS$", re.M)
-EXCLUS = {"mjsunit.js", "mjsunit_numfuzz.js"}
+EXCLUDED = {"mjsunit.js", "mjsunit_numfuzz.js"}
 
 
 def tests():
     for p in sorted(SUITE.rglob("*")):
-        if p.suffix not in (".js", ".mjs") or p.name in EXCLUS:
+        if p.suffix not in (".js", ".mjs") or p.name in EXCLUDED:
             continue
         rel = p.relative_to(SUITE).as_posix()
-        if FILTRE and not rel.startswith(FILTRE):
+        if FILTER and not rel.startswith(FILTER):
             continue
         # a test's helper files (imported modules...) are not tests:
         # run-tests takes every .js/.mjs, except those excluded by the status file (SKIP)
         yield p, rel
 
 
-def commande(p):
+def command(p):
     src = p.read_text(errors="replace")
     flags = []
     for m in FLAGS.finditer(src):
         flags += m.group(1).split()
-    fichiers = []
+    files = []
     for m in FILES.finditer(src):
-        fichiers += [str(RACINE / f) for f in m.group(1).split()]
+        files += [str(ROOT / f) for f in m.group(1).split()]
     env = dict(os.environ)
     for m in ENV.finditer(src):
-        for paire in m.group(1).split():
-            k, _, v = paire.partition("=")
+        for pair in m.group(1).split():
+            k, _, v = pair.partition("=")
             env[k] = v
-    harnais = [] if NO_HARNESS.search(src) else [str(SUITE / "mjsunit.js")]
-    cmd = [D8, "--test"] + harnais + fichiers + [str(p), "--random-seed=123", "--nohard-abort"] + flags
+    harness = [] if NO_HARNESS.search(src) else [str(SUITE / "mjsunit.js")]
+    cmd = [D8, "--test"] + harness + files + [str(p), "--random-seed=123", "--nohard-abort"] + flags
     return cmd, env, "--throws" in flags
 
 
-def executer(p, rel):
-    cmd, env, negatif = commande(p)
+def run_test(p, rel):
+    cmd, env, negative = command(p)
     t0 = time.time()
     try:
-        r = subprocess.run(cmd, capture_output=True, timeout=DELAI, env=env, cwd=str(RACINE))
+        r = subprocess.run(cmd, capture_output=True, timeout=TIMEOUT, env=env, cwd=str(ROOT))
         code = r.returncode
-        sortie = (r.stdout[-600:] + r.stderr[-600:]).decode(errors="replace")
+        output = (r.stdout[-600:] + r.stderr[-600:]).decode(errors="replace")
         # --throws is handled by d8 itself (exit code 0 if the expected exception was thrown)
-        etat = "PASS" if code == 0 else ("CRASH" if code < 0 else "FAIL")
+        status = "PASS" if code == 0 else ("CRASH" if code < 0 else "FAIL")
     except subprocess.TimeoutExpired:
-        code, sortie, etat = None, "", "TIMEOUT"
-    return {"test": rel, "etat": etat, "code": code, "duree": round(time.time() - t0, 2),
-            "sortie": sortie if etat != "PASS" else ""}
+        code, output, status = None, "", "TIMEOUT"
+    return {"test": rel, "etat": status, "code": code, "duree": round(time.time() - t0, 2),
+            "sortie": output if status != "PASS" else ""}
 
 
 def main():
-    liste = list(tests())
-    print(f"{len(liste)} tests, parallélisme {PARALLELE}", flush=True)
-    debut = time.time()
-    compte = {}
-    with SORTIE.open("w") as f, cf.ThreadPoolExecutor(PARALLELE) as ex:
-        for i, res in enumerate(ex.map(lambda t: executer(*t), liste), 1):
+    test_list = list(tests())
+    print(f"{len(test_list)} tests, parallelism {PARALLELISM}", flush=True)
+    start = time.time()
+    counts = {}
+    with OUTPUT.open("w") as f, cf.ThreadPoolExecutor(PARALLELISM) as ex:
+        for i, res in enumerate(ex.map(lambda t: run_test(*t), test_list), 1):
             f.write(json.dumps(res, ensure_ascii=False) + "\n")
-            compte[res["etat"]] = compte.get(res["etat"], 0) + 1
+            counts[res["etat"]] = counts.get(res["etat"], 0) + 1
             if i % 250 == 0:
                 f.flush()
-                print(f"{i}/{len(liste)} {compte} {int(time.time() - debut)} s", flush=True)
-    print("FIN", compte, f"{int(time.time() - debut)} s", flush=True)
+                print(f"{i}/{len(test_list)} {counts} {int(time.time() - start)} s", flush=True)
+    print("DONE", counts, f"{int(time.time() - start)} s", flush=True)
 
 
 if __name__ == "__main__":

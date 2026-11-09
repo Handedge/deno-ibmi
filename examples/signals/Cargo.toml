@@ -1,0 +1,9 @@
+[package]
+name = "signals"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+signal-hook = "=0.3.18"
+signal-hook-registry = "=1.4.8"
+libc = "0.2"

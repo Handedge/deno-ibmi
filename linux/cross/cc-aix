@@ -1,0 +1,39 @@
+#!/bin/bash
+# C compiler for the cross-compilation to AIX (LINUXBUILD). clang does not assemble AIX
+# assembly sources (.s/.S: it invokes the Linux GNU as). For those:
+#  1. a source that is empty once preprocessed (x86-only assembly, etc.) yields an empty object;
+#  2. otherwise the object assembled on IBM i, stored under its name in build/ibmi-objects,
+#     is copied (e.g. powerpc64_aix.s -> powerpc64_aix.o).
+# Everything else goes to clang.
+CLANG="$HOME/v8aix/clang/bin/clang"
+source="" output="" prev=""
+for a in "$@"; do
+  case "$a" in *.s|*.S) source="$a";; esac
+  [ "$prev" = "-o" ] && output="$a"
+  prev="$a"
+done
+if [ -n "$source" ] && [ -n "$output" ]; then
+  # preprocessor options only (-D, -I, -U, --target, --sysroot)
+  pp=()
+  prev=""
+  for a in "$@"; do
+    case "$prev" in -I|-D|-U|-include) pp+=("$prev" "$a");; esac
+    case "$a" in -D?*|-I?*|-U?*|--target=*|--sysroot=*) pp+=("$a");; esac
+    prev="$a"
+  done
+  if ! "$CLANG" -E -x assembler-with-cpp "${pp[@]}" "$source" 2>/dev/null \
+       | grep -vE '^\s*(#.*)?$' | grep -q .; then
+    printf '' | "$CLANG" --target=powerpc64-ibm-aix7.2 -x c -c - -o "$output"
+    exit $?
+  fi
+  name=$(basename "${source%.*}").o
+  # IBMI_OBJECTS: exported by cross-env.sh (build/ibmi-objects in the repository)
+  O=${IBMI_OBJECTS:-$(dirname "$(readlink -f "$0")")/../../build/ibmi-objects}
+  if [ -f "$O/$name" ]; then
+    cp "$O/$name" "$output"
+    exit 0
+  fi
+  echo "cc-aix: $source must be assembled on IBM i (put $name in build/ibmi-objects)" >&2
+  exit 1
+fi
+exec "$CLANG" "$@"

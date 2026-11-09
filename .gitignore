@@ -1,4 +1,4 @@
 target/
 *.o
 __pycache__/
-!construction/objets-ibmi/*.o
+!build/ibmi-objects/*.o

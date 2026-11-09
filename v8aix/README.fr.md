@@ -25,12 +25,12 @@ produit par LLVM accepté par l'`as` de PASE ; `gn gen` pour AIX.
 ## Reproduire
 
 ```sh
-~/v8aix/recuperer.sh                    # rusty_v8 v150.4.0 + sous-modules
+~/v8aix/fetch.sh                    # rusty_v8 v150.4.0 + sous-modules
 python3 tools/clang/scripts/update.py --output-dir ~/v8aix/clang
 python3 tools/ninja_gn_binaries.py --dir ~/v8aix/outils
 python3 tools/rust_toolchain.py         # seulement pour que la configuration se lise
-python3 ~/v8aix/correctifs_v8.py ~/v8aix/rusty_v8
-cp args.gn ~/v8aix/rusty_v8/out/aix/ && gn gen out/aix && ~/v8aix/compiler.sh
+python3 ~/v8aix/patches_v8.py ~/v8aix/rusty_v8
+cp args.gn ~/v8aix/rusty_v8/out/aix/ && gn gen out/aix && ~/v8aix/compile.sh
 ```
 
 ## Choix provisoires (à rétablir)
@@ -41,7 +41,7 @@ cp args.gn ~/v8aix/rusty_v8/out/aix/ && gn gen out/aix && ~/v8aix/compiler.sh
 | `icu_use_data_file = true` | l'intégration des données ICU passe par l'assembleur système | fournir des données ICU **big-endian** (icupkg) à Deno |
 | pas de compression de pointeurs ni de sandbox | comme le V8 de Node sur IBM i | à réévaluer |
 
-## Correctifs de sources (`correctifs_v8.py`)
+## Correctifs de sources (`patches_v8.py`)
 
 - **`#pragma pack` (sémantique XL)** : sur AIX, clang applique par défaut `-fxl-pragma-pack` (règles du
   compilateur XL d'IBM). Un `pack(push)`/`pack(4)` emboîté dans une classe ne se dépile pas comme avec gcc :

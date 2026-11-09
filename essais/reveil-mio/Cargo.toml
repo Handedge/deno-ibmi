@@ -1,9 +1,0 @@
-[package]
-name = "reveil-mio"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "io-util", "net", "sync", "macros", "process", "time"] }
-mio = "=1.2.4"
-libc = "0.2"

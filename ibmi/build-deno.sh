@@ -1,8 +1,8 @@
 exec > /tmp/rustpoc/deno2.log 2>&1
-# Native build of Deno on IBM i (PASE). Variables: PROFIL (ibmi-o1 | ibmi-os),
-# MOTEUR (quickjs | v8), CRATES_SRC (sources of the crates to patch, see preparer-deno.sh)
-PROFIL=${PROFIL:-ibmi-o1}
-MOTEUR=${MOTEUR:-quickjs}
+# Native build of Deno on IBM i (PASE). Variables: PROFILE (ibmi-o1 | ibmi-os),
+# ENGINE (quickjs | v8), CRATES_SRC (sources of the crates to patch, see prepare-deno.sh)
+PROFILE=${PROFILE:-ibmi-o1}
+ENGINE=${ENGINE:-quickjs}
 CRATES_SRC=${CRATES_SRC:-/QOpenSys/opt/denoibmi/crates-src}
 /QOpenSys/usr/bin/system "CHGJOB RUNPTY(20)" > /dev/null 2>&1
 . /QOpenSys/opt/rust/rustenv.sh
@@ -30,7 +30,7 @@ dump -X32 -ov $O/bind 2>&1 | grep -i maxdata | head -2
 #       by replaying the link (-s alone is enough; not -bgc, -bnoipath, -bcdtors, -bpD, memory)
 #  -bbigtoc: safety net in case the Rust part (small model) overflows the TOC; V8 is
 #       compiled with -mcmodel=large
-BIGTOC=; [ "$MOTEUR" = v8 ] && BIGTOC="-s -bbigtoc"
+BIGTOC=; [ "$ENGINE" = v8 ] && BIGTOC="-s -bbigtoc"
 printf '#!/QOpenSys/usr/bin/sh
 exec /QOpenSys/usr/bin/ld -bbinder:/QOpenSys/opt/rust/outils/bin/bind %s "$@"
 ' "$BIGTOC" > $O/ld
@@ -49,7 +49,7 @@ W=/QOpenSys/opt/denoibmi/wamr-factice
 (cd $W && gcc-12 -maix64 -O2 -c wamr_factice.c -o wamr_factice.o && rm -f libvmlib.a && ar -X64 -q libvmlib.a wamr_factice.o) && export WAMR_LIB_DIR=$W
 # V8 engine: library built on LINUXBUILD (v8aix/), pre-generated Rust binding,
 # Chromium libc++ already in the archive (no system C++ library to link)
-if [ "$MOTEUR" = v8 ]; then
+if [ "$ENGINE" = v8 ]; then
   export RUSTY_V8_ARCHIVE=/QOpenSys/opt/denoibmi/v8aix/librusty_v8.a
   export RUSTY_V8_SRC_BINDING_PATH=/QOpenSys/opt/denoibmi/v8aix/src_binding_aix.rs
   export CXXSTDLIB=
@@ -58,19 +58,19 @@ fi
 # Embedded ICU data (set_common_data_77 from deno_core): Cargo.toml.ibmi declares
 # deno_core without default features; without include_icu_data, Intl throws
 # "Internal error. Icu error." under V8 (QuickJS does not use ICU)
-FONCTIONS=$MOTEUR; [ "$MOTEUR" = v8 ] && FONCTIONS="v8,deno_core/include_icu_data"
-echo "MOTEUR=$MOTEUR PROFIL=$PROFIL"
+FEATURES=$ENGINE; [ "$ENGINE" = v8 ] && FEATURES="v8,deno_core/include_icu_data"
+echo "ENGINE=$ENGINE PROFILE=$PROFILE"
 cd /QOpenSys/opt/denoibmi/deno
 # rustc embeds librusty_v8.a in the .rlib of the v8 crate, and cargo does not rebuild it
 # when the archive changes under the same path: clean it if the archive is newer
-if [ "$MOTEUR" = v8 ]; then
-  for r in target/$PROFIL/deps/libv8-*.rlib; do
-    [ -f "$r" ] && [ "$RUSTY_V8_ARCHIVE" -nt "$r" ] && { echo "archive V8 plus récente que $r : cargo clean -p v8"; cargo clean -p v8 --profile $PROFIL; break; }
+if [ "$ENGINE" = v8 ]; then
+  for r in target/$PROFILE/deps/libv8-*.rlib; do
+    [ -f "$r" ] && [ "$RUSTY_V8_ARCHIVE" -nt "$r" ] && { echo "V8 archive newer than $r: cargo clean -p v8"; cargo clean -p v8 --profile $PROFILE; break; }
   done
 fi
-python3.9 $(cd "$(dirname "$0")" && pwd)/ajouter-profils.py $(cd "$(dirname "$0")/.." && pwd)/deno/Cargo.toml.ibmi Cargo.toml
+python3.9 $(cd "$(dirname "$0")" && pwd)/add-profiles.py $(cd "$(dirname "$0")/.." && pwd)/deno/Cargo.toml.ibmi Cargo.toml
 mkdir -p /QOpenSys/opt/denoibmi/patches
-python3.9 $(cd "$(dirname "$0")" && pwd)/correctifs.py $CRATES_SRC /QOpenSys/opt/denoibmi/patches
+python3.9 $(cd "$(dirname "$0")" && pwd)/patches.py $CRATES_SRC /QOpenSys/opt/denoibmi/patches
 grep -q '^\[patch.crates-io\]' Cargo.toml || printf '
 [patch.crates-io]
 ' >> Cargo.toml
@@ -97,14 +97,14 @@ for v in 0.29.0 0.30.1; do k=nix-$(echo $v | tr -d . | cut -c1-3); [ -d /QOpenSy
 grep -A8 'patch.crates-io' Cargo.toml
 date
 # retry if the PASE loader could not start rustc (0509-037, occasional under load)
-for essai in $(seq 1 30); do
-  cargo build -p deno --profile $PROFIL --no-default-features --features $FONCTIONS > /tmp/rustpoc/cargo.out 2>&1
+for attempt in $(seq 1 30); do
+  cargo build -p deno --profile $PROFILE --no-default-features --features $FEATURES > /tmp/rustpoc/cargo.out 2>&1
   rc=$?
   grep -vE '^\s+(Downloaded|Compiling|Locking|Adding|Downloading)|generated [0-9]+ warning|jobserver from env|build environment is likely|^\s*\|?\s*$|^\s+= note: the build env|^warning' /tmp/rustpoc/cargo.out | grep -E -B2 -A25 '^error|0509-' | tail -120
-  echo "essai $essai : rc=$rc"
+  echo "attempt $attempt: rc=$rc"
   [ $rc -eq 0 ] && break
   grep -q '0509-037' /tmp/rustpoc/cargo.out || break
 done
 date
-ls -l target/$PROFIL/deno
-echo FIN
+ls -l target/$PROFILE/deno
+echo DONE
