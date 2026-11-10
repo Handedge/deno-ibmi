@@ -89,6 +89,10 @@ chmod 644 %{buildroot}%{libd}/libpaseat.a %{buildroot}%{libd}/libunwind.a %{buil
 %{pkgs}/share/doc/deno/BUILD-INFO
 
 %changelog
+* Tue Nov 10 2026 Sylvain AKTEPE <16803966+Handedge@users.noreply.github.com> - 2.9.8-3
+- Same binary as 2.9.8-1; db2.ts: Db2Pool reset "restore" also restores CURRENT PATH, and documents
+  what it does not reset (global variables, job environment variables, CHGJOB attributes)
+
 * Tue Nov 10 2026 Sylvain AKTEPE <16803966+Handedge@users.noreply.github.com> - 2.9.8-2
 - Same binary as 2.9.8-1; THIRD_PARTY_LICENSES.md states the redistribution terms of the IBM libunwind
 
