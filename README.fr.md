@@ -154,11 +154,13 @@ Mesuré sur IBMI : 4 requêtes d'1 s (DLYJOB) en parallèle en 1,04 s ; 50 requ�
 
 | `reset` | Effet |
 |---|---|
-| `"restore"` (par défaut) | annule le travail non validé, rétablit le schéma courant et la liste de bibliothèques d'origine, vide QTEMP ; en cas d'échec, la connexion est jetée |
+| `"restore"` (par défaut) | annule le travail non validé, rétablit le schéma courant, le chemin SQL (`CURRENT PATH`) et la liste de bibliothèques d'origine, vide QTEMP ; en cas d'échec, la connexion est jetée |
 | `"discard"` | ferme la connexion ; la requête suivante en reçoit une neuve |
 | `"none"` | rien n'est réinitialisé : seulement avec des noms entièrement qualifiés et aucune instruction qui modifie l'état du travail |
 
-La remise à zéro se fait après le renvoi du résultat : elle n'ajoute pas de délai à la requête. `examples/deno-db2/test-pool-isolation.ts` reproduit la fuite avec `"none"` (bibliothèque ajoutée, `SET SCHEMA`, table QTEMP encore présentes à la requête suivante) et montre que `"restore"` et `"discard"` la suppriment (vérifié sur IBM i 7.5, le 09/11/2026).
+`"restore"` ne couvre que ce qui est listé ci-dessus. **Les valeurs des variables globales** (`SET MABIB.MAVAR = ...`), **les variables d'environnement du travail** (`ADDENVVAR ... LEVEL(*JOB)`) et **les attributs du travail modifiés par `CHGJOB`** (`DATFMT`, etc.) n'ont pas de remise à zéro simple et restent visibles pour la requête suivante : si des requêtes en modifient, choisir `"discard"`.
+
+La remise à zéro se fait après le renvoi du résultat : elle n'ajoute pas de délai à la requête. `examples/deno-db2/test-pool-isolation.ts` reproduit la fuite avec `"none"` (bibliothèque ajoutée, `SET SCHEMA`, `SET PATH`, table QTEMP, variable globale, variable d'environnement, `CHGJOB DATFMT` encore présents à la requête suivante), montre que `"restore"` supprime les quatre premiers mais pas les trois derniers, et que `"discard"` les supprime tous (vérifié sur IBM i 7.5, le 10/11/2026).
 
 **Noms non qualifiés en nommage système.** Dès qu'un schéma par défaut est fixé, par `SET SCHEMA` ou par l'option `library` (attribut de connexion `SQL_ATTR_DBC_DEFAULT_LIB`), les tables non qualifiées sont cherchées dans ce schéma et **plus à travers `*LIBL`**, même si une autre bibliothèque contenant la même table est placée avant dans la liste, ou si la bibliothèque du schéma n'est même pas dans la liste. « Schéma par défaut » et « nommage système + CHGLIBL » sont donc deux alternatives, pas des options à combiner. Règle la plus simple pour les connexions d'un pool : des noms entièrement qualifiés.
 

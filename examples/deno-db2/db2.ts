@@ -372,13 +372,17 @@ export class Db2 {
  * What happens to a pooled connection when it goes back to the pool.
  *
  * A pooled connection is a QSQSRVR job that is reused by the next request: anything a request
- * changes in that job (library list, current schema, QTEMP objects such as declared global
- * temporary tables, uncommitted work) would otherwise be inherited by the next borrower.
- *   - "restore" (default): roll back uncommitted work, restore the initial current schema and
- *     library list, clear QTEMP. If restoring fails, the connection is discarded.
+ * changes in that job (library list, current schema, SQL path, QTEMP objects such as declared
+ * global temporary tables, uncommitted work, global variables, job attributes...) would otherwise
+ * be inherited by the next borrower.
+ *   - "restore" (default): roll back uncommitted work, restore the initial current schema, SQL
+ *     path and library list, clear QTEMP. If restoring fails, the connection is discarded.
+ *     It covers only these: global variable values (SET MYLIB.MYVAR = ...), job-level environment
+ *     variables (ADDENVVAR LEVEL(*JOB)) and job attributes changed with CHGJOB (DATFMT...) are
+ *     NOT reset. Use "discard" if requests do any of that.
  *   - "discard": close the connection; the next borrower gets a fresh QSQSRVR job.
  *   - "none": nothing is reset. Only safe with fully qualified names and no statement that
- *     changes the job state (CHGLIBL, SET SCHEMA, QTEMP...).
+ *     changes the job state (CHGLIBL, SET SCHEMA, SET PATH, QTEMP...).
  */
 export type PoolReset = "restore" | "discard" | "none";
 
@@ -388,6 +392,7 @@ export interface Db2PoolOptions extends Db2Options {
 
 interface InitialState {
   schema: string;      // CURRENT SCHEMA when the connection was opened ("*LIBL" with system naming)
+  path: string;        // CURRENT PATH: quoted list ("QSYS","QSYS2",...) or *LIBL with system naming
   libraries: string[]; // user portion of the library list
   currentLibrary: string | null;
 }
@@ -420,11 +425,13 @@ export class Db2Pool {
     this.#all.push(db);
     if (this.#reset === "restore") {
       try {
-        const [s] = await db.queryAsync("VALUES CURRENT SCHEMA");
+        const [s] = await db.queryAsync("VALUES (CURRENT SCHEMA, CURRENT PATH)");
         const list = await db.queryAsync(
           "SELECT SCHEMA_NAME, TYPE FROM QSYS2.LIBRARY_LIST_INFO ORDER BY ORDINAL_POSITION");
+        const [schema, path] = Object.values(s).map((v) => String(v).trim());
         this.#initial.set(db, {
-          schema: String(Object.values(s)[0]).trim(),
+          schema,
+          path,
           libraries: list.filter((r) => r.TYPE === "USER").map((r) => String(r.SCHEMA_NAME).trim()),
           currentLibrary: list.find((r) => r.TYPE === "CURRENT")?.SCHEMA_NAME as string ?? null,
         });
@@ -460,6 +467,8 @@ export class Db2Pool {
     if (!st) throw new Error("initial state unknown");
     if (this.options.autocommit === false) db.rollback();
     await db.executeAsync(st.schema === "*LIBL" ? "SET SCHEMA DEFAULT" : `SET SCHEMA ${quoteIdentifier(st.schema)}`);
+    // the path read back from CURRENT PATH is already valid SET PATH syntax (verified, both namings)
+    await db.executeAsync(`SET PATH = ${st.path}`);
     const libl = st.libraries.length ? st.libraries.join(" ") : "*NONE";
     await db.executeAsync("CALL QSYS2.QCMDEXC(?)",
       [`CHGLIBL LIBL(${libl}) CURLIB(${st.currentLibrary ?? "*CRTDFT"})`]);

@@ -163,14 +163,20 @@ global temporary tables, uncommitted work) would be inherited by the next borrow
 
 | `reset` | Effect |
 |---|---|
-| `"restore"` (default) | roll back uncommitted work, restore the initial current schema and library list, clear QTEMP; on failure the connection is discarded |
+| `"restore"` (default) | roll back uncommitted work, restore the initial current schema, SQL path (`CURRENT PATH`) and library list, clear QTEMP; on failure the connection is discarded |
 | `"discard"` | close the connection; the next request gets a fresh one |
 | `"none"` | nothing is reset: only for fully qualified names and no statement that changes the job state |
 
+`"restore"` covers only what is listed above. **Global variable values** (`SET MYLIB.MYVAR = ...`),
+**job-level environment variables** (`ADDENVVAR ... LEVEL(*JOB)`) and **job attributes changed with
+`CHGJOB`** (`DATFMT`, etc.) have no simple reset and are still seen by the next request: if requests do
+any of that, use `"discard"`.
+
 The reset runs after the result has been returned, so it does not add latency to the request.
 `examples/deno-db2/test-pool-isolation.ts` reproduces the leak with `"none"` (added library, `SET SCHEMA`,
-QTEMP table still there on the next request) and shows that `"restore"` and `"discard"` remove it
-(verified on IBM i 7.5, 2026-11-09).
+`SET PATH`, QTEMP table, global variable, environment variable, `CHGJOB DATFMT` all still there on the
+next request), shows that `"restore"` removes the first four but not the last three, and that
+`"discard"` removes them all (verified on IBM i 7.5, 2026-11-10).
 
 **Unqualified names with system naming.** Once a default schema is set, either with `SET SCHEMA` or with the
 `library` option (connection attribute `SQL_ATTR_DBC_DEFAULT_LIB`), unqualified table names resolve in that
