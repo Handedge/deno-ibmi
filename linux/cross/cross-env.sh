@@ -15,7 +15,11 @@ export CROSS_TARGET=$AIX_TRIPLE
 
 # Rust for the target only (build scripts remain x86_64)
 export CARGO_TARGET_POWERPC64_IBM_AIX_LINKER=$CROSS_DIR/rust-linker.sh
-export CARGO_TARGET_POWERPC64_IBM_AIX_RUSTFLAGS="--cap-lints warn -Z function-sections=no -L /QOpenSys/opt/rust/runtime -l paseat -C link-arg=-blibpath:/QOpenSys/opt/rust/runtime:/QOpenSys/pkgs/lib:/usr/lib:/lib"
+# Library search path of the binary: the RPM layout first (/QOpenSys/pkgs/lib/deno: libpaseat, libunwind),
+# then the build machine layout (/QOpenSys/opt/rust/runtime), so one binary serves both.
+# --remap-path-prefix: no build account path (/home/<account>/.cargo, .rustup) in the distributed binary.
+LIBPATH_AIX=/QOpenSys/pkgs/lib/deno:/QOpenSys/opt/rust/runtime:/QOpenSys/pkgs/lib:/usr/lib:/lib
+export CARGO_TARGET_POWERPC64_IBM_AIX_RUSTFLAGS="--cap-lints warn -Z function-sections=no -L /QOpenSys/opt/rust/runtime -l paseat -C link-arg=-blibpath:$LIBPATH_AIX --remap-path-prefix=$HOME/.cargo=/cargo --remap-path-prefix=$HOME/.rustup=/rustup"
 
 # C/C++ for the target: Chromium clang + PASE headers (same as V8)
 C_FLAGS="--target=powerpc64-ibm-aix7.2 -fintegrated-as -mignore-xcoff-visibility --sysroot=$SYSROOT -mcpu=pwr8 -fno-xl-pragma-pack -D__PASE__ -D_ALL_SOURCE=1 -D_THREAD_SAFE -D__STDC_LIMIT_MACROS -D__STDC_CONSTANT_MACROS -O2"

@@ -14,7 +14,7 @@ sous leur propre licence :
 | `bindings/nghttp2_bindings_aix.rs` | liaisons générées depuis les en-têtes de [nghttp2](https://github.com/nghttp2/nghttp2) | MIT |
 | `bindings/libuv_bindings_aix.rs` | liaisons générées depuis les en-têtes de [libuv](https://github.com/libuv/libuv) | MIT |
 | `v8aix/src_binding_aix.rs` | liaisons générées depuis les en-têtes de [V8](https://v8.dev) / [rusty_v8](https://github.com/denoland/rusty_v8) | BSD-3-Clause / MIT |
-| correctifs de `ibmi/patches.py`, `v8aix/patches_v8.py`, `linux/croise/prepare-cross.py` | modifications de [Deno](https://github.com/denoland/deno) (MIT), de rusty_v8 (MIT), de V8 (BSD-3-Clause) et de crates de crates.io (chacune sous sa licence, surtout MIT et/ou Apache-2.0) | licence du projet modifié |
+| correctifs de `ibmi/patches.py`, `v8aix/patches_v8.py`, `linux/cross/prepare-cross.py` | modifications de [Deno](https://github.com/denoland/deno) (MIT), de rusty_v8 (MIT), de V8 (BSD-3-Clause) et de crates de crates.io (chacune sous sa licence, surtout MIT et/ou Apache-2.0) | licence du projet modifié |
 
 Aucun binaire IBM n'est distribué dans ce dépôt. L'IBM Open SDK for Rust on AIX et le runtime IBM Open
 XL C/C++ utilisés sur IBM i s'obtiennent auprès d'IBM, aux conditions d'IBM.

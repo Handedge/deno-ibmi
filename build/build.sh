@@ -1,7 +1,10 @@
 #!/bin/bash
 # Builds Deno for IBM i IN A SINGLE COMMAND, from LINUXBUILD, starting from a fresh clone of Deno.
 #
-#   bash build/build.sh [--tests quick|full|none]      (default: full)
+#   bash build/build.sh [--tests quick|full|none] [--rpm] [--rpm-release N]
+#     --tests        quick: no unit tests (no package); full: the default
+#     --rpm          also build the deno RPM (/QOpenSys/pkgs layout) once the full tests pass
+#     --rpm-release  RPM release number (default 1)
 #
 # Pipeline: prepared tree (prepare-tree.sh) → snapshot generator cross-compiled → linked and
 # run on IBM i → Deno cross-compiled with that snapshot → linked on IBM i → tests.
@@ -12,7 +15,16 @@
 # 0 Deno-specific discrepancy (deno-tests/compare-unit.py).
 set -euo pipefail
 TESTS=full
-[ "${1:-}" = "--tests" ] && TESTS=${2:-full}
+RPM=0
+RPM_RELEASE=1
+while [ $# -gt 0 ]; do
+  case $1 in
+    --tests) TESTS=${2:-full}; shift 2 ;;
+    --rpm) RPM=1; shift ;;
+    --rpm-release) RPM_RELEASE=${2:?release number}; shift 2 ;;
+    *) echo "ERROR: unknown option $1"; sed -n '4,7p' "$0"; exit 1 ;;
+  esac
+done
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 R=/QOpenSys/opt/denoibmi
 RUST=${RUST_VERSION:-1.99.1}
@@ -37,7 +49,7 @@ step "1. build tree (fresh clone, patches)"
 bash "$REPO/build/prepare-tree.sh"
 
 step "2. scripts and JS sources copied to IBMI"
-tar cf - -C "$REPO" ibmi deno-tests | $SSH 'mkdir -p /QOpenSys/opt/deno-ibmi && cd /QOpenSys/opt/deno-ibmi && tar xf -'
+tar cf - -C "$REPO" ibmi deno-tests packaging publication/public examples/deno-db2/db2.ts | $SSH 'mkdir -p /QOpenSys/opt/deno-ibmi && cd /QOpenSys/opt/deno-ibmi && tar xf -'
 (cd "$R/deno" && find ext runtime cli libs -type f \( -name "*.js" -o -name "*.ts" -o -name "*.mjs" -o -name "*.cjs" -o -name "*.json" \) \
    -not -path "*/tests/*" -not -path "*/testdata/*" -not -path "*/node_modules/*" | tar cf - -T -) \
   | $SSH "cd $R/deno && tar xf -"
@@ -92,7 +104,20 @@ if [ "$TESTS" = full ]; then
   step "8. release package (installed with ibmi/deploy.sh, by an administrator)"
   commit=$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo "unversioned copy")
   deno_source="${DENO_VERSION:-v2.9.8} ($(git -C "$R/deno" log -1 --format='%h of %cs'))"   # main carries version number 2.9.8
-  $SSH "/QOpenSys/usr/bin/sh /QOpenSys/opt/deno-ibmi/ibmi/package-release.sh '$commit' '$rate % of applicable cases, 0 Deno-specific discrepancy' '$deno_source'"
+  package_out=$($SSH "/QOpenSys/usr/bin/sh /QOpenSys/opt/deno-ibmi/ibmi/package-release.sh '$commit' '$rate % of applicable cases, 0 Deno-specific discrepancy' '$deno_source'")
+  echo "$package_out"
+  package=$(echo "$package_out" | sed -n 's|^package ready: .*/||p')
+
+  if [ "$RPM" = 1 ]; then
+    step "9. deno RPM (/QOpenSys/pkgs layout, release $RPM_RELEASE)"
+    version=$(echo "$package" | cut -d- -f3)
+    # third-party licenses of the crates actually linked into this binary
+    (cd "$R/deno" && cargo +"$RUST" tree -q -p deno --no-default-features --features v8,deno_core/include_icu_data \
+       -e normal,build --target powerpc64-ibm-aix --prefix none --format "{p}|{l}") \
+      | python3 "$REPO/packaging/third-party-licenses.py" "$version" \
+      | $SSH "cat > /QOpenSys/opt/deno-ibmi/packaging/THIRD_PARTY_LICENSES.md"
+    $SSH "/QOpenSys/usr/bin/sh /QOpenSys/opt/deno-ibmi/ibmi/make-rpm.sh '$package' '$RPM_RELEASE' '$commit'"
+  fi
 fi
 
 step "DONE in $(( ($(date +%s) - start) / 60 )) min: $R/croise/deno on IBMI (log: $LOG)"

@@ -14,6 +14,37 @@ Projet personnel et non officiel de Sylvain AKTEPE : ni Deno Land Inc. ni IBM ne
 > **Reconstruire Deno pour IBM i : [`build/README.md`](build/README.fr.md)** (une commande sur
 > LINUXBUILD, tests et paquet de livraison compris ; mise en service par `ibmi/deploy.sh`).
 
+## Installer avec yum
+
+Deno est disponible en RPM signé dans un dépôt yum tiers, comme les paquets open source d'IBM i.
+Prérequis : **IBM i 7.5 ou plus récent**, POWER8 ou plus récent, l'environnement yum d'IBM
+(`/QOpenSys/pkgs/bin` dans le `PATH`). En administrateur, en ssh ou sous QP2TERM :
+
+```
+curl -o /QOpenSys/etc/yum/repos.d/deno-ibmi.repo https://yum.job-i.fr/deno-ibmi/deno-ibmi.repo
+yum install deno
+```
+
+À la première installation, yum demande d'accepter la clé de signature
+(`RPM-GPG-KEY-deno-ibmi`, Sylvain AKTEPE, empreinte `8182 36E7 94FB B0BF D6DE  D98C 003F 3EDC D33E 3056`).
+Ensuite :
+
+```
+deno --version
+deno eval "console.log(Deno.build.os, Deno.build.arch)"     # aix powerpc64
+```
+
+| Installé | Chemin |
+|---|---|
+| commande `deno` | `/QOpenSys/pkgs/bin/deno` (lanceur : `XPG_SUS_ENV=ON` et `DENO_NO_UPDATE_CHECK=1` par défaut) |
+| binaire et bibliothèques d'exécution | `/QOpenSys/pkgs/lib/deno/` (`deno`, `libpaseat.a`, `libunwind.a` d'IBM) |
+| module Db2 for i | `/QOpenSys/pkgs/share/deno/db2.ts` (`import { Db2 } from "/QOpenSys/pkgs/share/deno/db2.ts"`, lancer avec `--allow-ffi`) |
+| licences | `/QOpenSys/pkgs/share/licenses/deno/` |
+
+Mise à jour : `yum upgrade deno` ; désinstallation : `yum remove deno`. IBM i 7.3 n'est pas pris en charge
+(sa libc PASE n'a pas des fonctions dont le binaire a besoin) et la 7.4 n'est pas testée ; rpm refuse le
+paquet en dessous de la 7.5.
+
 ## État (06/11/2026)
 
 - **Deno 2.9.8 sur moteur V8** (compilé en croisé sur LINUXBUILD, lié sur IBM i) en service sur IBMI
@@ -119,6 +150,18 @@ await pool.withConnection(async (db) => { await db.executeAsync("UPDATE ..."); d
 
 Mesuré sur IBMI : 4 requêtes d'1 s (DLYJOB) en parallèle en 1,04 s ; 50 requêtes concurrentes justes en 29 ms.
 
+**Connexions du pool et état du travail.** Chaque connexion fonctionne en mode serveur, donc dans son propre travail QSQSRVR, sous le profil avec lequel elle a été ouverte (celui du travail si aucun utilisateur n'est donné). Ce travail est réutilisé par la requête suivante : tout ce qu'une requête y modifie (liste de bibliothèques, schéma courant, objets de QTEMP comme les tables temporaires globales déclarées, travail non validé) serait hérité par la suivante. L'option `reset` de `Db2Pool` fixe ce qui se passe quand une connexion revient dans le pool :
+
+| `reset` | Effet |
+|---|---|
+| `"restore"` (par défaut) | annule le travail non validé, rétablit le schéma courant et la liste de bibliothèques d'origine, vide QTEMP ; en cas d'échec, la connexion est jetée |
+| `"discard"` | ferme la connexion ; la requête suivante en reçoit une neuve |
+| `"none"` | rien n'est réinitialisé : seulement avec des noms entièrement qualifiés et aucune instruction qui modifie l'état du travail |
+
+La remise à zéro se fait après le renvoi du résultat : elle n'ajoute pas de délai à la requête. `examples/deno-db2/test-pool-isolation.ts` reproduit la fuite avec `"none"` (bibliothèque ajoutée, `SET SCHEMA`, table QTEMP encore présentes à la requête suivante) et montre que `"restore"` et `"discard"` la suppriment (vérifié sur IBM i 7.5, le 09/11/2026).
+
+**Noms non qualifiés en nommage système.** Dès qu'un schéma par défaut est fixé, par `SET SCHEMA` ou par l'option `library` (attribut de connexion `SQL_ATTR_DBC_DEFAULT_LIB`), les tables non qualifiées sont cherchées dans ce schéma et **plus à travers `*LIBL`**, même si une autre bibliothèque contenant la même table est placée avant dans la liste, ou si la bibliothèque du schéma n'est même pas dans la liste. « Schéma par défaut » et « nommage système + CHGLIBL » sont donc deux alternatives, pas des options à combiner. Règle la plus simple pour les connexions d'un pool : des noms entièrement qualifiés.
+
 Lancer avec `--allow-ffi`. Types : entiers, DOUBLE et DECIMAL jusqu'à 15 chiffres en nombres ; BIGINT au-delà de 2^53 et grands DECIMAL en chaînes ; CHAR sans blancs de fin ; dates et heures ISO ; BLOB/BINARY en `Uint8Array`. `query`/`execute` sont synchrones, `queryAsync`/`executeAsync` et `Db2Pool` non bloquants ; options de `Db2` : `user` (profil), `password` (mot de passe), `library` (schéma par défaut), `systemNaming` (nommage *SYS), `database`, `autocommit` ; `pool.stats` rend `{ size, open, idle, waiting }`.
 
 ## Lancer le webservice Deno
@@ -157,8 +200,8 @@ Fonctionnent (vérifié) : `WebAssembly`, `Deno.Command`, `node:crypto`, `Deno.o
 - **Marques** : « Deno » et le logo Deno sont des marques de Deno Land Inc. IBM, IBM i, AIX, Power, Db2 et PASE sont des marques d'International Business Machines Corporation. Les autres noms peuvent être des marques de leurs propriétaires respectifs. Ils ne sont cités que pour décrire ce avec quoi le projet fonctionne.
 - **Code open source modifié** : les correctifs modifient Deno (MIT), rusty_v8 (MIT), V8 (BSD-3-Clause) et de nombreuses crates Rust (surtout MIT et/ou Apache-2.0). Le code modifié reste sous sa licence et son copyright d'origine.
 - **Fichiers construits à partir de sources tierces** (objets de libffi, zlib-ng et psm ; liaisons bindgen des en-têtes de SQLite, AWS-LC, nghttp2, libuv et V8) : chacun reste sous sa propre licence, listée dans [THIRD_PARTY_NOTICES.fr.md](THIRD_PARTY_NOTICES.fr.md).
-- **Aucun logiciel IBM n'est distribué ici** : l'IBM Open SDK for Rust on AIX, le runtime IBM Open XL C/C++, la CLI SQL de PASE (`libdb400`) et IBM i lui-même s'obtiennent auprès d'IBM et s'utilisent selon les conditions de licence d'IBM.
-- **Aucun binaire de Deno ni de V8 n'est distribué** dans ce dépôt, seulement de quoi en construire un ; un binaire que vous construisez contient du code tiers soumis aux licences ci-dessus.
+- **Logiciels IBM** : l'IBM Open SDK for Rust on AIX, le compilateur et le runtime IBM Open XL C/C++, la CLI SQL de PASE (`libdb400`) et IBM i lui-même s'obtiennent auprès d'IBM et s'utilisent selon les conditions de licence d'IBM. Le seul fichier IBM redistribué l'est dans le RPM : `libunwind.a`, non modifié, issu de l'IBM XL C/C++ for AIX 17.1.3 Runtime Environment, dont les License Information le classent parmi les Redistributables ; IBM le fournit « tel quel », sans garantie ni support (détails dans [`packaging/THIRD_PARTY_LICENSES.md`](packaging/THIRD_PARTY_LICENSES.md)).
+- **Binaires** : ce dépôt ne contient aucun binaire de Deno ni de V8, seulement de quoi en construire un. Le RPM du dépôt yum contient un binaire construit ainsi ; il inclut du code tiers soumis aux licences listées dans [`packaging/THIRD_PARTY_LICENSES.md`](packaging/THIRD_PARTY_LICENSES.md) (installé dans `/QOpenSys/pkgs/share/licenses/deno/`) et relève des mêmes conditions « sans garantie, sans responsabilité » que le reste du projet.
 
 ## Licence
 

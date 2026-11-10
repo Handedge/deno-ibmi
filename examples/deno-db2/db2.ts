@@ -369,33 +369,114 @@ export class Db2 {
 }
 
 /**
+ * What happens to a pooled connection when it goes back to the pool.
+ *
+ * A pooled connection is a QSQSRVR job that is reused by the next request: anything a request
+ * changes in that job (library list, current schema, QTEMP objects such as declared global
+ * temporary tables, uncommitted work) would otherwise be inherited by the next borrower.
+ *   - "restore" (default): roll back uncommitted work, restore the initial current schema and
+ *     library list, clear QTEMP. If restoring fails, the connection is discarded.
+ *   - "discard": close the connection; the next borrower gets a fresh QSQSRVR job.
+ *   - "none": nothing is reset. Only safe with fully qualified names and no statement that
+ *     changes the job state (CHGLIBL, SET SCHEMA, QTEMP...).
+ */
+export type PoolReset = "restore" | "discard" | "none";
+
+export interface Db2PoolOptions extends Db2Options {
+  reset?: PoolReset;
+}
+
+interface InitialState {
+  schema: string;      // CURRENT SCHEMA when the connection was opened ("*LIBL" with system naming)
+  libraries: string[]; // user portion of the library list
+  currentLibrary: string | null;
+}
+
+const quoteIdentifier = (s: string) => `"${s.replace(/"/g, '""')}"`;
+
+/**
  * Connection pool: concurrent queries run in parallel on several connections
  * (each one in its own QSQSRVR job), without blocking Deno.
- *   const pool = new Db2Pool(4);
+ *   const pool = new Db2Pool(4);                       // reset: "restore" by default
  *   const rows = await pool.query("SELECT ...", [param]);
  */
 export class Db2Pool {
   #idle: Db2[] = [];
   #all: Db2[] = [];
-  #waiting: ((db: Db2) => void)[] = [];
+  #waiting: { ok: (db: Db2) => void; ko: (e: unknown) => void }[] = [];
+  #initial = new Map<Db2, InitialState>();
+  #reset: PoolReset;
 
-  constructor(public size = 4, private options: Db2Options = {}) {}
+  constructor(public size = 4, private options: Db2PoolOptions = {}) {
+    this.#reset = options.reset ?? "restore";
+  }
+
+  get reset(): PoolReset {
+    return this.#reset;
+  }
+
+  async #open(): Promise<Db2> {
+    const db = new Db2(this.options);
+    this.#all.push(db);
+    if (this.#reset === "restore") {
+      try {
+        const [s] = await db.queryAsync("VALUES CURRENT SCHEMA");
+        const list = await db.queryAsync(
+          "SELECT SCHEMA_NAME, TYPE FROM QSYS2.LIBRARY_LIST_INFO ORDER BY ORDINAL_POSITION");
+        this.#initial.set(db, {
+          schema: String(Object.values(s)[0]).trim(),
+          libraries: list.filter((r) => r.TYPE === "USER").map((r) => String(r.SCHEMA_NAME).trim()),
+          currentLibrary: list.find((r) => r.TYPE === "CURRENT")?.SCHEMA_NAME as string ?? null,
+        });
+      } catch (e) {
+        this.#drop(db);
+        throw e;
+      }
+    }
+    return db;
+  }
 
   async #acquire(): Promise<Db2> {
     const db = this.#idle.pop();
     if (db) return db;
-    if (this.#all.length < this.size) {
-      const created = new Db2(this.options);
-      this.#all.push(created);
-      return created;
-    }
-    return await new Promise<Db2>((ok) => this.#waiting.push(ok));
+    if (this.#all.length < this.size) return await this.#open();
+    return await new Promise<Db2>((ok, ko) => this.#waiting.push({ ok, ko }));
   }
 
-  #release(db: Db2) {
+  #drop(db: Db2) {
+    db.close();
+    this.#all = this.#all.filter((x) => x !== db);
+    this.#initial.delete(db);
+  }
+
+  #handOver(db: Db2) {
     const next = this.#waiting.shift();
-    if (next) next(db);
+    if (next) next.ok(db);
     else this.#idle.push(db);
+  }
+
+  async #restore(db: Db2) {
+    const st = this.#initial.get(db);
+    if (!st) throw new Error("initial state unknown");
+    if (this.options.autocommit === false) db.rollback();
+    await db.executeAsync(st.schema === "*LIBL" ? "SET SCHEMA DEFAULT" : `SET SCHEMA ${quoteIdentifier(st.schema)}`);
+    const libl = st.libraries.length ? st.libraries.join(" ") : "*NONE";
+    await db.executeAsync("CALL QSYS2.QCMDEXC(?)",
+      [`CHGLIBL LIBL(${libl}) CURLIB(${st.currentLibrary ?? "*CRTDFT"})`]);
+    await db.executeAsync("CALL QSYS2.QCMDEXC('CLRLIB LIB(QTEMP)')");
+  }
+
+  async #release(db: Db2) {
+    try {
+      if (this.#reset === "discard") throw new Error("discard");
+      if (this.#reset === "restore") await this.#restore(db);
+      this.#handOver(db);
+    } catch {
+      // discarded on purpose, or the reset failed: never reuse a connection in an unknown state
+      this.#drop(db);
+      const next = this.#waiting.shift();
+      if (next) this.#open().then(next.ok, next.ko);
+    }
   }
 
   /** Lends a connection for the duration of fn (multi-statement transactions). */
@@ -404,7 +485,9 @@ export class Db2Pool {
     try {
       return await fn(db);
     } finally {
-      this.#release(db);
+      // not awaited: the caller gets its result at once; the connection only goes back to the
+      // pool (or to the next waiter) once it has been reset
+      void this.#release(db);
     }
   }
 
@@ -424,5 +507,6 @@ export class Db2Pool {
     for (const db of this.#all) db.close();
     this.#all = [];
     this.#idle = [];
+    this.#initial.clear();
   }
 }

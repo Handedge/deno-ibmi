@@ -28,6 +28,36 @@ Author: **Sylvain AKTEPE**. This is a personal, unofficial project; see the [Dis
 > **Rebuilding Deno for IBM i: [`build/README.md`](build/README.md)** (one command on
 > LINUXBUILD, tests and delivery package included; deployment with `ibmi/deploy.sh`).
 
+## Install with yum
+
+Deno is available as a signed RPM from a third-party yum repository, the same way as the IBM i open-source
+packages. Requirements: **IBM i 7.5 or later**, POWER8 or later, the IBM yum environment
+(`/QOpenSys/pkgs/bin` in the `PATH`). As an administrator, in ssh or QP2TERM:
+
+```
+curl -o /QOpenSys/etc/yum/repos.d/deno-ibmi.repo https://yum.job-i.fr/deno-ibmi/deno-ibmi.repo
+yum install deno
+```
+
+On the first installation, yum asks you to accept the signing key
+(`RPM-GPG-KEY-deno-ibmi`, Sylvain AKTEPE, fingerprint `8182 36E7 94FB B0BF D6DE  D98C 003F 3EDC D33E 3056`).
+Then:
+
+```
+deno --version
+deno eval "console.log(Deno.build.os, Deno.build.arch)"     # aix powerpc64
+```
+
+| Installed | Path |
+|---|---|
+| `deno` command | `/QOpenSys/pkgs/bin/deno` (launcher, sets `XPG_SUS_ENV=ON` and `DENO_NO_UPDATE_CHECK=1` by default) |
+| binary and runtime libraries | `/QOpenSys/pkgs/lib/deno/` (`deno`, `libpaseat.a`, IBM `libunwind.a`) |
+| Db2 for i module | `/QOpenSys/pkgs/share/deno/db2.ts` (`import { Db2 } from "/QOpenSys/pkgs/share/deno/db2.ts"`, run with `--allow-ffi`) |
+| licenses | `/QOpenSys/pkgs/share/licenses/deno/` |
+
+Update with `yum upgrade deno`, remove with `yum remove deno`. IBM i 7.3 is not supported (its PASE libc lacks
+functions the binary needs) and 7.4 is not tested; rpm refuses the package below 7.5.
+
 ## Status (2026-11-06)
 
 - **Deno 2.9.8 on the V8 engine** (cross-compiled on LINUXBUILD, linked on IBM i) in service on IBMI
@@ -125,6 +155,30 @@ connection; `pool.stats` gives `{ size, open, idle, waiting }`.)
 
 Measured on IBMI: 4 one-second queries (DLYJOB) in parallel in 1.04 s; 50 concurrent queries, all correct, in 29 ms.
 
+**Pooled connections and job state.** Each connection runs in server mode, i.e. in its own QSQSRVR job, under
+the profile it was opened with (the job's profile when no user is given). That job is reused by the next
+request, so anything a request changes in it (library list, current schema, QTEMP objects such as declared
+global temporary tables, uncommitted work) would be inherited by the next borrower. The `reset` option of
+`Db2Pool` decides what happens when a connection goes back to the pool:
+
+| `reset` | Effect |
+|---|---|
+| `"restore"` (default) | roll back uncommitted work, restore the initial current schema and library list, clear QTEMP; on failure the connection is discarded |
+| `"discard"` | close the connection; the next request gets a fresh one |
+| `"none"` | nothing is reset: only for fully qualified names and no statement that changes the job state |
+
+The reset runs after the result has been returned, so it does not add latency to the request.
+`examples/deno-db2/test-pool-isolation.ts` reproduces the leak with `"none"` (added library, `SET SCHEMA`,
+QTEMP table still there on the next request) and shows that `"restore"` and `"discard"` remove it
+(verified on IBM i 7.5, 2026-11-09).
+
+**Unqualified names with system naming.** Once a default schema is set, either with `SET SCHEMA` or with the
+`library` option (connection attribute `SQL_ATTR_DBC_DEFAULT_LIB`), unqualified table names resolve in that
+schema and **no longer through `*LIBL`**, even if another library holding the same table comes first in the
+library list, or the default schema's library is not in the list at all. "Default schema" and
+"system naming + CHGLIBL" are therefore two alternatives, not options to combine. Simplest rule for pooled
+connections: use fully qualified names.
+
 Run with `--allow-ffi`. Types: integers, DOUBLE and DECIMAL up to 15 digits as numbers; BIGINT beyond 2^53 and large DECIMAL as strings; CHAR without trailing blanks; ISO dates and times; BLOB/BINARY as `Uint8Array`. `query`/`execute` are synchronous, `queryAsync`/`executeAsync` and `Db2Pool` are non-blocking.
 
 ## Running the Deno web service
@@ -191,11 +245,17 @@ Deno Land Inc., IBM or any other company.
 - **Files built from third-party sources** (libffi, zlib-ng, psm objects, bindgen bindings of SQLite,
   AWS-LC, nghttp2, libuv and V8 headers): each one stays under its own license, listed in
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-- **IBM software is not distributed here**: the IBM Open SDK for Rust on AIX, the IBM Open XL C/C++
-  runtime, the PASE SQL CLI (`libdb400`) and IBM i itself must be obtained from IBM and used under
-  IBM's license terms.
-- **No Deno or V8 binary is distributed** in this repository, only the means to build one; a binary
-  you build includes third-party code under the licenses above.
+- **IBM software**: the IBM Open SDK for Rust on AIX, the IBM Open XL C/C++ compiler and runtime, the
+  PASE SQL CLI (`libdb400`) and IBM i itself must be obtained from IBM and used under IBM's license
+  terms. The only IBM file redistributed is in the RPM: `libunwind.a`, unmodified, from the IBM XL C/C++
+  for AIX 17.1.3 Runtime Environment, whose License Information lists it among the Redistributables;
+  IBM provides it "AS IS", without warranty or support (details in
+  [`packaging/THIRD_PARTY_LICENSES.md`](packaging/THIRD_PARTY_LICENSES.md)).
+- **Binaries**: this repository contains no Deno or V8 binary, only the means to build one. The RPM of
+  the yum repository contains a binary built with it; it includes third-party code under the licenses
+  listed in [`packaging/THIRD_PARTY_LICENSES.md`](packaging/THIRD_PARTY_LICENSES.md) (installed in
+  `/QOpenSys/pkgs/share/licenses/deno/`), and comes under the same "no warranty, no liability" terms as
+  the rest of the project.
 
 ## License
 

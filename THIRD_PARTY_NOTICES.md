@@ -14,7 +14,7 @@ their own licenses:
 | `bindings/nghttp2_bindings_aix.rs` | bindings generated from [nghttp2](https://github.com/nghttp2/nghttp2) headers | MIT |
 | `bindings/libuv_bindings_aix.rs` | bindings generated from [libuv](https://github.com/libuv/libuv) headers | MIT |
 | `v8aix/src_binding_aix.rs` | bindings generated from [V8](https://v8.dev) / [rusty_v8](https://github.com/denoland/rusty_v8) headers | BSD-3-Clause / MIT |
-| patches in `ibmi/patches.py`, `v8aix/patches_v8.py`, `linux/croise/prepare-cross.py` | modifications of [Deno](https://github.com/denoland/deno) (MIT), rusty_v8 (MIT), V8 (BSD-3-Clause) and of crates from crates.io (each under its own license, mostly MIT and/or Apache-2.0) | license of the patched project |
+| patches in `ibmi/patches.py`, `v8aix/patches_v8.py`, `linux/cross/prepare-cross.py` | modifications of [Deno](https://github.com/denoland/deno) (MIT), rusty_v8 (MIT), V8 (BSD-3-Clause) and of crates from crates.io (each under its own license, mostly MIT and/or Apache-2.0) | license of the patched project |
 
 No IBM binary is distributed in this repository. The IBM Open SDK for Rust on AIX and the IBM Open
 XL C/C++ runtime used on IBM i must be obtained from IBM under IBM's terms.
