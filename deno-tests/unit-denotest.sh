@@ -18,6 +18,8 @@ T=/QOpenSys/opt/denoibmi/denotests
   done
 ) &
 rm -f /tmp/rustpoc/$RUN_NAME.fin
-cd $T && /QOpenSys/pkgs/bin/python3.9 unit.py $T /QOpenSys/opt/denoibmi/croise/deno $T/target/aix/test_server /tmp/rustpoc/$RUN_NAME.jsonl 3 $FILTER
+# unit.py of the repository copy (next to this script), not an older copy left in $T
+U=$(cd "$(dirname "$0")" && pwd)/unit.py
+cd $T && /QOpenSys/pkgs/bin/python3.9 -X faulthandler $U $T /QOpenSys/opt/denoibmi/croise/deno $T/target/aix/test_server /tmp/rustpoc/$RUN_NAME.jsonl 3 $FILTER
 touch /tmp/rustpoc/$RUN_NAME.fin
 echo "DONE $RUN_NAME"

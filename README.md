@@ -51,7 +51,7 @@ deno eval "console.log(Deno.build.os, Deno.build.arch)"     # aix powerpc64
 | Installed | Path |
 |---|---|
 | `deno` command | `/QOpenSys/pkgs/bin/deno` (launcher, sets `XPG_SUS_ENV=ON` and `DENO_NO_UPDATE_CHECK=1` by default) |
-| binary and runtime libraries | `/QOpenSys/pkgs/lib/deno/` (`deno`, `libpaseat.a`, IBM `libunwind.a`) |
+| binary and runtime libraries | `/QOpenSys/pkgs/lib/deno/` (`deno`, `denort` for `deno compile`, `libpaseat.a`, IBM `libunwind.a`) |
 | Db2 for i module | `/QOpenSys/pkgs/share/deno/db2.ts` (`import { Db2 } from "/QOpenSys/pkgs/share/deno/db2.ts"`, run with `--allow-ffi`) |
 | licenses | `/QOpenSys/pkgs/share/licenses/deno/` |
 
@@ -203,12 +203,28 @@ SBMJOB CMD(CALL PGM(QP2SHELL) PARM('/QOpenSys/usr/bin/sh' '/QOpenSys/opt/denoibm
 In service, the web service runs in its own subsystem started at IPL: see
 [`examples/deno-ws/subsystem.md`](examples/deno-ws/subsystem.md).
 
+## Single executables: `deno compile`
+
+`deno compile` turns a program (TypeScript, local modules, npm packages, `db2.ts`) into one IBM i
+executable that runs without Deno installed:
+
+```
+deno compile --allow-net --allow-ffi --output /home/ME/app app.ts
+SBMJOB CMD(CALL PGM(QP2SHELL) PARM('/home/ME/app' 'arg1')) ALWMLTTHD(*YES)
+```
+
+The runtime it starts from (`denort`, ≈ 214 MB) is shipped by the RPM in `/QOpenSys/pkgs/lib/deno`,
+next to `deno`; there is nothing to download. The program is appended after the end of the XCOFF file,
+which the AIX loader ignores, and read back at startup. The executable sets `XPG_SUS_ENV=ON` by itself
+(it re-executes once, like `deno`). Verified on IBM i 7.5 (2026-11-12): Db2 through FFI, an npm package,
+`Deno.serve` and `fetch`, started from the `PATH`, from a relative path and through `SBMJOB`; startup in
+0.3 s. Only IBM i targets: `--target` for another system would need the `denort` of that system.
+
 ## Known limitations
 
 - **WAMR is not available**: WAMR (used by Deno for a few internal WebAssembly helpers) assumes a
   little-endian machine and knows neither AIX nor PowerPC; it is replaced by a stub library (`tools/`).
   The standard `WebAssembly` API is provided by V8 and works (`WebAssembly.instantiate`, verified).
-- **`deno compile` is unusable**: XCOFF binaries have no embedded section for the payload.
 - **Tests excluded as not applicable on IBM i**: a small set of official unit tests is excluded from the
   "applicable" score, each with its documented reason in
   [`deno-tests/compare-unit.py`](deno-tests/compare-unit.py): no GPU (WebGPU, canvas), no esbuild binary

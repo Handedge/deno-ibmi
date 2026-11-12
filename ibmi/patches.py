@@ -738,8 +738,11 @@ unsafe fn win_size(fd: libc::c_int, data: *mut libc::winsize) -> nix::Result<lib
 replace(ry, 'Err(e) if e == Errno::EWOULDBLOCK || e == Errno::EINTR => Ok(None),',
               'Err(e) if e == Errno::EAGAIN || e == Errno::EINTR => Ok(None),')
 
-# libsui (deno compile): reads the program's ELF notes; nothing like that in
-# XCOFF -> on AIX, never an embedded section (Deno = plain binary)
+# libsui (deno compile): reads the program's ELF notes; nothing like that in XCOFF. On AIX the
+# section is appended after the end of the XCOFF file (the AIX loader only maps what the headers
+# describe and ignores trailing bytes: verified on IBM i 7.5 with 1 MB appended to deno), followed
+# by a trailer: <data><name><name length u32 BE><data length u64 BE>"SUIXCOF1". find_section reads
+# the trailer of the running program (std::env::current_exe) and only the section, not the file.
 su = copy_crate("libsui-0.16.4") / "lib.rs"
 replace(su,
 '''#[cfg(all(unix, not(target_vendor = "apple")))]
@@ -753,17 +756,84 @@ pub use elf::find_section_in_current_image;
 #[cfg(target_os = "aix")]
 pub use xcoff::{find_section, find_section_in_current_image};
 
-/// AIX / IBM i PASE (XCOFF) : pas de section embarquee
-#[cfg(target_os = "aix")]
-mod xcoff {
-    pub fn find_section(_name: &str) -> std::io::Result<Option<&[u8]>> {
-        Ok(None)
+/// Trailer of a section appended to an XCOFF executable (AIX, IBM i PASE)
+const XCOFF_SUI_MAGIC: &[u8; 8] = b"SUIXCOF1";
+
+/// XCOFF (AIX, IBM i PASE): the section is appended after the end of the file, which the AIX
+/// loader ignores, followed by <name><name length u32 BE><data length u64 BE>"SUIXCOF1".
+pub struct Xcoff<'a> {
+    data: &'a [u8],
+}
+
+impl<'a> Xcoff<'a> {
+    pub fn new(data: &'a [u8]) -> Self {
+        Self { data }
     }
 
-    pub fn find_section_in_current_image(_name: &str) -> std::io::Result<Option<&'static [u8]>> {
-        Ok(None)
+    pub fn append<W: Write>(&self, name: &str, sectdata: &[u8], writer: &mut W) -> Result<(), Error> {
+        if !utils::is_xcoff(self.data) {
+            return Err(Error::InvalidObject("Not a 64-bit XCOFF file"));
+        }
+        if self.data.ends_with(XCOFF_SUI_MAGIC) {
+            return Err(Error::InvalidObject("XCOFF file already has an appended section"));
+        }
+        writer.write_all(self.data)?;
+        writer.write_all(sectdata)?;
+        writer.write_all(name.as_bytes())?;
+        writer.write_all(&(name.len() as u32).to_be_bytes())?;
+        writer.write_all(&(sectdata.len() as u64).to_be_bytes())?;
+        writer.write_all(XCOFF_SUI_MAGIC)?;
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "aix")]
+mod xcoff {
+    use std::io::{Read, Seek, SeekFrom};
+
+    pub fn find_section(name: &str) -> std::io::Result<Option<&'static [u8]>> {
+        let mut f = std::fs::File::open(std::env::current_exe()?)?;
+        let size = f.seek(SeekFrom::End(0))?;
+        if size < 20 {
+            return Ok(None);
+        }
+        let mut trailer = [0u8; 20];
+        f.seek(SeekFrom::End(-20))?;
+        f.read_exact(&mut trailer)?;
+        if &trailer[12..] != super::XCOFF_SUI_MAGIC {
+            return Ok(None);
+        }
+        let name_len = u32::from_be_bytes(trailer[0..4].try_into().unwrap()) as u64;
+        let data_len = u64::from_be_bytes(trailer[4..12].try_into().unwrap());
+        let start = match size.checked_sub(20 + name_len).and_then(|n| n.checked_sub(data_len)) {
+            Some(s) => s,
+            None => return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "bad XCOFF section trailer")),
+        };
+        let mut stored = vec![0u8; name_len as usize];
+        f.seek(SeekFrom::Start(start + data_len))?;
+        f.read_exact(&mut stored)?;
+        if stored != name.as_bytes() {
+            return Ok(None);
+        }
+        let mut data = vec![0u8; data_len as usize];
+        f.seek(SeekFrom::Start(start))?;
+        f.read_exact(&mut data)?;
+        // read once per process, kept for its whole lifetime (like a mapped section)
+        Ok(Some(Box::leak(data.into_boxed_slice())))
+    }
+
+    pub fn find_section_in_current_image(name: &str) -> std::io::Result<Option<&'static [u8]>> {
+        find_section(name)
     }
 }''')
+replace(su,
+'''    /// Check if the given data is a PE32+ binary''',
+'''    /// Check if the given data is a 64-bit XCOFF binary (AIX, IBM i PASE)
+    pub fn is_xcoff(data: &[u8]) -> bool {
+        data.len() >= 2 && u16::from_be_bytes([data[0], data[1]]) == 0x01f7
+    }
+
+    /// Check if the given data is a PE32+ binary''')
 replace(su, '#[cfg(all(unix, not(target_vendor = "apple")))]\nmod elf {',
               '#[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "aix")))]\nmod elf {')
 
@@ -1431,6 +1501,69 @@ replace(SIMD,
 """            // deno-ibmi : masque relu en little-endian (must_cast suppose un processeur LE)
             let o = sum0.as_array_ref();
             u64::from_le_bytes([o[0], o[1], o[2], o[3], o[4], o[5], o[6], o[7]])""")
+
+# ---- 2026-11-12: deno compile ----
+
+# deno compile on IBM i: the section is appended to the XCOFF runtime (libsui patch above);
+# the runtime is the denort binary shipped next to deno (RPM: /QOpenSys/pkgs/lib/deno/denort),
+# found there without DENORT_BIN (there is no denort download for AIX).
+STANDALONE = DENO / "cli" / "standalone" / "binary.rs"
+replace(STANDALONE,
+"""  } else if target.contains("windows") {
+    let mut pe = libsui::PortableExecutable::from(&original_bin)?;""",
+"""  } else if target.contains("aix") {
+    // deno-ibmi : section ajoutee apres la fin du fichier XCOFF (voir patches.py)
+    libsui::Xcoff::new(&original_bin).append(
+      "d3n0l4nd",
+      &data_section_bytes,
+      &mut file_writer,
+    )?;
+  } else if target.contains("windows") {
+    let mut pe = libsui::PortableExecutable::from(&original_bin)?;""")
+replace(STANDALONE,
+"""  libsui::utils::is_elf(&data)
+    || libsui::utils::is_pe(&data)""",
+"""  libsui::utils::is_elf(&data)
+    || libsui::utils::is_xcoff(&data)
+    || libsui::utils::is_pe(&data)""")
+replace(STANDALONE,
+"""fn get_dev_binary_path() -> Option<OsString> {
+  env::var_os("DENORT_BIN").or_else(|| {
+    env::current_exe().ok().and_then(|exec_path| {
+      if exec_path""",
+"""fn get_dev_binary_path() -> Option<OsString> {
+  env::var_os("DENORT_BIN").or_else(|| {
+    env::current_exe().ok().and_then(|exec_path| {
+      // deno-ibmi : pas de denort a telecharger pour AIX, il est livre a cote de deno
+      if cfg!(target_os = "aix")
+        || exec_path""")
+
+# denort: same SPEC1170 re-exec as deno (V8 needs MAP_FIXED to replace mappings, see above), so
+# that a compiled program runs correctly without XPG_SUS_ENV=ON set by the caller.
+replace(DENO / "cli" / "rt" / "lib.rs",
+"""pub fn main() {
+  init_logging(None, None);""",
+"""// deno-ibmi : mode SPEC1170 de la libc AIX (MAP_FIXED direct), comme deno (cli/lib.rs)
+#[cfg(target_os = "aix")]
+fn relancer_avec_xpg_sus_env() {
+  use std::os::unix::process::CommandExt;
+  if env::var_os("XPG_SUS_ENV").is_some_and(|v| v == "ON")
+    || env::var_os("DENO_IBMI_SANS_XPG").is_some()
+  {
+    return;
+  }
+  let Ok(exe) = env::current_exe() else { return };
+  let err = std::process::Command::new(exe)
+    .args(env::args_os().skip(1))
+    .env("XPG_SUS_ENV", "ON")
+    .exec();
+  eprintln!("deno-ibmi : relance avec XPG_SUS_ENV=ON impossible ({err}), on continue");
+}
+
+pub fn main() {
+  #[cfg(target_os = "aix")]
+  relancer_avec_xpg_sus_env();
+  init_logging(None, None);""")
 
 if REPORT:
     print()

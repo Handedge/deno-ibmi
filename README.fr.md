@@ -37,7 +37,7 @@ deno eval "console.log(Deno.build.os, Deno.build.arch)"     # aix powerpc64
 | Installé | Chemin |
 |---|---|
 | commande `deno` | `/QOpenSys/pkgs/bin/deno` (lanceur : `XPG_SUS_ENV=ON` et `DENO_NO_UPDATE_CHECK=1` par défaut) |
-| binaire et bibliothèques d'exécution | `/QOpenSys/pkgs/lib/deno/` (`deno`, `libpaseat.a`, `libunwind.a` d'IBM) |
+| binaire et bibliothèques d'exécution | `/QOpenSys/pkgs/lib/deno/` (`deno`, `denort` pour `deno compile`, `libpaseat.a`, `libunwind.a` d'IBM) |
 | module Db2 for i | `/QOpenSys/pkgs/share/deno/db2.ts` (`import { Db2 } from "/QOpenSys/pkgs/share/deno/db2.ts"`, lancer avec `--allow-ffi`) |
 | licences | `/QOpenSys/pkgs/share/licenses/deno/` |
 
@@ -179,6 +179,17 @@ SBMJOB CMD(CALL PGM(QP2SHELL) PARM('/QOpenSys/usr/bin/sh' '/QOpenSys/opt/denoibm
 
 `ws.sh` (dans `examples/deno-ws`) positionne `DENO_NO_UPDATE_CHECK=1` : sans elle, la vérification de mise à jour de `deno run` (fetch HTTPS sortant) fait avorter le processus.
 
+## Exécutables autonomes : `deno compile`
+
+`deno compile` transforme un programme (TypeScript, modules locaux, paquets npm, `db2.ts`) en un seul exécutable IBM i, qui tourne sans que Deno soit installé :
+
+```
+deno compile --allow-net --allow-ffi --output /home/MOI/app app.ts
+SBMJOB CMD(CALL PGM(QP2SHELL) PARM('/home/MOI/app' 'arg1')) ALWMLTTHD(*YES)
+```
+
+Le runtime de départ (`denort`, ≈ 214 Mo) est livré par le RPM dans `/QOpenSys/pkgs/lib/deno`, à côté de `deno` : rien à télécharger. Le programme est ajouté après la fin du fichier XCOFF, que le chargeur d'AIX ignore, et relu au démarrage. L'exécutable positionne lui-même `XPG_SUS_ENV=ON` (il se relance une fois, comme `deno`). Vérifié sur IBM i 7.5 le 12/11/2026 : Db2 par FFI, paquet npm, `Deno.serve` et `fetch`, lancement par le `PATH`, par un chemin relatif et par `SBMJOB` ; démarrage en 0,3 s. Cibles IBM i seulement : `--target` vers un autre système demanderait le `denort` de ce système.
+
 ## Limites actuelles
 
 Vérifiées sur la version V8 le 06/11/2026 :
@@ -186,7 +197,6 @@ Vérifiées sur la version V8 le 06/11/2026 :
 - `Deno.resolveDns` échoue (pas de `/etc/resolv.conf` sous PASE) ; la résolution ordinaire (`fetch`, `Deno.connect`) fonctionne.
 - `Deno.loadavg()` renvoie `0,0,0` (non fourni par PASE).
 - `Deno.networkInterfaces()` : interfaces nommées par leur adresse IP, sans adresse MAC.
-- `deno compile` inutilisable (pas de section embarquée en XCOFF).
 - WAMR remplacé par une bibliothèque factice ; l'API `WebAssembly` standard, fournie par V8, fonctionne.
 
 Fonctionnent (vérifié) : `WebAssembly`, `Deno.Command`, `node:crypto`, `Deno.osUptime()`, `Deno.systemMemoryInfo()`, sortie naturelle du processus après des appels Db2 asynchrones.

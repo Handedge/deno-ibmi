@@ -91,15 +91,24 @@ def main():
     srv = subprocess.Popen([TEST_SERVER], cwd=str(ROOT / "tests/testdata"), stdout=subprocess.PIPE,
                            stderr=subprocess.STDOUT)
     t0 = time.time()
-    ready = 0                                    # 39 servers, each one prints "ready:…"
-    while ready < 39 and time.time() - t0 < 180:
-        l = srv.stdout.readline()
-        if not l:
-            break
-        ready += l.startswith(b"ready:")
-    # drain the server output continuously, otherwise a full pipe blocks it
     import threading
-    threading.Thread(target=lambda: [None for _ in iter(srv.stdout.readline, b"")], daemon=True).start()
+    count = [0]                                  # 39 servers, each one prints "ready:…"
+    all_ready = threading.Event()
+
+    def drain():
+        # reads the server output for the whole run (a full pipe would block it) and counts the
+        # "ready:" lines; the wait below is bounded even if the server goes silent (2026-11-12:
+        # a run stayed blocked 35 min in readline() before the first test)
+        for l in iter(srv.stdout.readline, b""):
+            if l.startswith(b"ready:"):
+                count[0] += 1
+                if count[0] >= 39:
+                    all_ready.set()
+        all_ready.set()
+
+    threading.Thread(target=drain, daemon=True).start()
+    all_ready.wait(180)
+    ready = count[0]
     print(f"test_server: {ready}/39 ready in {time.time() - t0:.1f} s; {len(files)} files, "
           f"parallelism {PARALLELISM}", flush=True)
     start = time.time()

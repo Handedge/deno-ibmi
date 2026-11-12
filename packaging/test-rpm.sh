@@ -2,7 +2,7 @@
 # Smoke test of an installed deno RPM (any IBM i profile, ssh or QP2TERM).
 #   [KEEP=1] sh test-rpm.sh [port]
 # Checks: version, eval, TypeScript, Intl, npm-free node: module, Deno.serve, Db2 through
-# /QOpenSys/pkgs/share/deno/db2.ts. Prints PASS/FAIL per check; exit code = number of failures.
+# /QOpenSys/pkgs/share/deno/db2.ts, deno compile (the Db2 script as a single executable). Prints PASS/FAIL per check; exit code = number of failures.
 # KEEP=1: the temporary directory /tmp/deno-rpm-test.<pid> is kept (machines where nothing is deleted).
 PORT=${1:-3990}
 D=/QOpenSys/pkgs/bin/deno
@@ -36,6 +36,8 @@ console.log("db2", JSON.stringify(db.query("SELECT CURRENT USER AS U, CURRENT SE
 db.close();
 EOF
 check "db2" $D run --allow-ffi db2.ts
+# deno compile: single executable, run without deno or XPG_SUS_ENV
+check "compile" sh -c "$D compile --quiet --allow-ffi --output app db2.ts && unset XPG_SUS_ENV && ./app"
 cd /
 [ "${KEEP:-0}" = 1 ] && echo "kept: $T" || rm -rf $T
 echo "failures: $failures"

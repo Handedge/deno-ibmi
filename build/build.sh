@@ -77,6 +77,9 @@ ls "$R/snapshot-genere"; [ -s "$R/snapshot-genere/CLI_SNAPSHOT.bin" ] || { echo 
 step "5. Deno: cross-compiled with this snapshot, then linked on IBM i"
 DENO_SNAPSHOT_PREBUILT=$R/snapshot-genere cargo_aix -p deno --no-default-features --features v8,deno_core/include_icu_data
 link_on_ibmi deno deno
+# denort: the runtime that "deno compile" appends the program to (shipped next to deno)
+DENO_SNAPSHOT_PREBUILT=$R/snapshot-genere cargo_aix -p denort --features deno_core/include_icu_data
+link_on_ibmi denort denort
 
 step "6. quick test"
 $SSH "ulimit -d 8388608; export XPG_SUS_ENV=ON DENO_NO_UPDATE_CHECK=1 NO_COLOR=1 DENO_DIR=/tmp/rustpoc/dd-rapide; D=$R/croise/deno; \

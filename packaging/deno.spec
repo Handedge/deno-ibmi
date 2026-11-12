@@ -3,7 +3,7 @@
 # Usage: built by ibmi/make-rpm.sh on IBM i (rpm-build from the IBM yum repository):
 #   rpmbuild --define "_topdir <dir>" --define "deno_version 2.9.8" --define "deno_release 1" \
 #            --define "deno_ibmi_commit <commit>" -bb deno.spec
-# Sources (in %{_sourcedir}): deno, libpaseat.a, libunwind.a, deno-launcher.sh, db2.ts, LICENSE,
+# Sources (in %{_sourcedir}): deno, denort, libpaseat.a, libunwind.a, deno-launcher.sh, db2.ts, LICENSE,
 # THIRD_PARTY_NOTICES.md, THIRD_PARTY_LICENSES.md, BUILD-INFO.
 #
 # The deno binary is cross-compiled on Linux, then linked and tested on IBM i (see the deno-ibmi
@@ -41,6 +41,7 @@ Source5:        LICENSE
 Source6:        THIRD_PARTY_NOTICES.md
 Source7:        THIRD_PARTY_LICENSES.md
 Source8:        BUILD-INFO
+Source9:        denort
 # Only PASE system libraries are needed (libc, libpthread, libbsd); libpaseat and the IBM
 # libunwind are shipped in %{libd}, which is first in the binary's library search path.
 AutoReqProv:    no
@@ -51,7 +52,8 @@ Unofficial build: not affiliated with, sponsored or endorsed by Deno Land Inc. o
 
 Includes Deno.serve (HTTP and native HTTPS), fetch, npm packages, Deno.Command, FFI, and a Db2 for i
 module for TypeScript (%{pkgs}/share/deno/db2.ts, through the PASE SQL CLI). Requires IBM i 7.5 or
-later on a POWER8 or later system. "deno compile" is not supported. Built from deno-ibmi commit
+later on a POWER8 or later system. "deno compile" builds single-file IBM i executables (runtime:
+%{libd}/denort). Built from deno-ibmi commit
 %{deno_ibmi_commit}.
 
 %prep
@@ -64,12 +66,12 @@ later on a POWER8 or later system. "deno compile" is not supported. Built from d
 rm -rf %{buildroot}
 mkdir -p %{buildroot}%{pkgs}/bin %{buildroot}%{libd} %{buildroot}%{pkgs}/share/deno \
          %{buildroot}%{pkgs}/share/licenses/deno %{buildroot}%{pkgs}/share/doc/deno
-cp %{SOURCE0} %{SOURCE1} %{SOURCE2} %{buildroot}%{libd}/
+cp %{SOURCE0} %{SOURCE1} %{SOURCE2} %{SOURCE9} %{buildroot}%{libd}/
 cp %{SOURCE3} %{buildroot}%{pkgs}/bin/deno
 cp %{SOURCE4} %{buildroot}%{pkgs}/share/deno/db2.ts
 cp %{SOURCE5} %{SOURCE6} %{SOURCE7} %{buildroot}%{pkgs}/share/licenses/deno/
 cp %{SOURCE8} %{buildroot}%{pkgs}/share/doc/deno/BUILD-INFO
-chmod 755 %{buildroot}%{pkgs}/bin/deno %{buildroot}%{libd}/deno
+chmod 755 %{buildroot}%{pkgs}/bin/deno %{buildroot}%{libd}/deno %{buildroot}%{libd}/denort
 chmod 644 %{buildroot}%{libd}/libpaseat.a %{buildroot}%{libd}/libunwind.a %{buildroot}%{pkgs}/share/deno/db2.ts
 
 %files
@@ -77,6 +79,7 @@ chmod 644 %{buildroot}%{libd}/libpaseat.a %{buildroot}%{libd}/libunwind.a %{buil
 %{pkgs}/bin/deno
 %dir %{libd}
 %{libd}/deno
+%{libd}/denort
 %{libd}/libpaseat.a
 %{libd}/libunwind.a
 %dir %{pkgs}/share/deno
@@ -89,6 +92,10 @@ chmod 644 %{buildroot}%{libd}/libpaseat.a %{buildroot}%{libd}/libunwind.a %{buil
 %{pkgs}/share/doc/deno/BUILD-INFO
 
 %changelog
+* Thu Nov 12 2026 Sylvain AKTEPE <16803966+Handedge@users.noreply.github.com> - 2.9.8-4
+- deno compile: builds single-file IBM i executables; the runtime (denort) is shipped in
+  /QOpenSys/pkgs/lib/deno and the program is appended after the end of the XCOFF file
+
 * Tue Nov 10 2026 Sylvain AKTEPE <16803966+Handedge@users.noreply.github.com> - 2.9.8-3
 - Same binary as 2.9.8-1; db2.ts: Db2Pool reset "restore" also restores CURRENT PATH, and documents
   what it does not reset (global variables, job environment variables, CHGJOB attributes)

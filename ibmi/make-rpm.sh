@@ -20,7 +20,7 @@ VERSION=$(XPG_SUS_ENV=ON "$P/deno" --version | head -1 | awk '{print $2}')
 rm -rf $TOP/SOURCES $TOP/BUILD $TOP/BUILDROOT
 mkdir -p $TOP/SOURCES $TOP/SPECS $TOP/RPMS $TOP/BUILD
 S=$TOP/SOURCES
-cp $P/deno $P/libpaseat.a $S/
+cp $P/deno $P/denort $P/libpaseat.a $S/
 cp /QOpenSys/opt/rust/runtime/libunwind.a $S/          # IBM Open XL C/C++ runtime
 cp $REPO/packaging/deno-launcher.sh $REPO/examples/deno-db2/db2.ts $S/
 cp $REPO/publication/public/LICENSE $REPO/publication/public/THIRD_PARTY_NOTICES.md $S/
